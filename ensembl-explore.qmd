@@ -1,0 +1,158 @@
+---
+title: "understanding_ensemble"
+format: 
+    html:
+      toc: true
+      self-contained: true
+      highlight-style: github
+      code-line-numbers: true
+editor: visual
+editor_options: 
+  chunk_output_type: console
+---
+
+## Load packages, data
+
+```{r}
+suppressPackageStartupMessages({
+  library(SpatialExperiment)
+  library(dplyr)
+  library(ggplot2)
+  library(cowplot)
+  library(clue)
+  library(khroma)
+  library(scran)
+  library(limma)
+  library(tibble)
+  #library(googlesheets4)
+  library(readr)
+  library(ggrepel)
+})
+
+datadir <- "data"
+spe <- readRDS(file.path(datadir,
+                         "obs_Br8100_151673_spe.RDS"))
+
+calc_entropy <- function(u) {
+  p <- u[u>0]
+  p <- p/sum(p)
+  -sum(p*log(p))
+}
+
+```
+
+## Running Code
+
+```{r}
+cd <- colData(spe) %>% as.data.frame
+
+```
+
+```{r}
+tb <- table(cd$ground_truth, cd$bass_LCA)
+hung <- solve_LSAP(tb, maximum = TRUE)
+
+myscale2 <- myscale1 <- c(color("muted")(7))
+
+(lookup <- data.frame(gt = levels(spe$ground_truth)[seq_along(hung)], 
+                     ensembl = levels(spe$bass_LCA)[hung]))
+
+names(myscale1) <- lookup$gt
+names(myscale2) <- lookup$ensembl
+
+myplot <- NULL + theme_classic() +
+  theme(legend.position = "bottom") +
+  scale_x_continuous(expand = expansion(0,1)) +
+  scale_y_continuous(expand = expansion(0,1))
+
+p <- ggplot(cd, aes(row, col, colour=ground_truth)) + 
+  geom_point(size = 2.5) +
+  scale_colour_manual(values = myscale1) +
+  theme_classic() +
+  theme(legend.position = "bottom") +
+  scale_x_continuous(expand = expansion(0,1)) +
+  scale_y_continuous(expand = expansion(0,1))
+
+q <- ggplot(cd, aes(row, col, colour=bass_LCA)) + 
+  geom_point(size = 2.5) +
+  scale_colour_manual(values = myscale2) +
+  theme_classic() +
+  theme(legend.position = "bottom") +
+  scale_x_continuous(expand = expansion(0,1)) +
+  scale_y_continuous(expand = expansion(0,1))
+
+
+plot_grid(p, q)
+
+```
+
+## 
+
+```{r}
+
+mm1 <- model.matrix(~ground_truth, data=cd)
+mm2 <- model.matrix(~bass_LCA, data=cd)
+
+mgv <- modelGeneVar(spe)
+keep <- mgv$bio > 0
+
+lcounts <- as.matrix(logcounts(spe[keep,]))
+
+f1 <- lmFit(lcounts, mm1)
+f1 <- eBayes(f1, trend = TRUE)
+f2 <- lmFit(lcounts, mm2)
+f2 <- eBayes(f2, trend = TRUE)
+
+tt1 <- topTable(f1, coef=2:7, sort.by = "none", n = Inf)
+tt2 <- topTable(f2, coef=2:7, sort.by = "none", n = Inf)
+
+tt1 %>% arrange(desc(F)) %>% head(3)
+tt2 %>% arrange(desc(F)) %>% head(3)
+
+aac1 <- aggregateAcrossCells(spe, spe$ground_truth, 
+                             subset.row = keep) %>% counts
+aac2 <- aggregateAcrossCells(spe, spe$bass_LCA, 
+                             subset.row = keep) %>% counts
+
+# spot checks
+all(rownames(f1$coefficients)==rownames(aac1))
+all(rownames(tt2$ID)==rownames(aac2))
+
+ent1 <- apply(aac1, 1, calc_entropy)
+ent2 <- apply(aac2, 1, calc_entropy)
+
+df1 <- data.frame(tt1[,c("ID","F")], entropy=ent1)
+df2 <- data.frame(tt2[,c("ID","F")], entropy=ent2)
+
+m <- merge(df1, df2, by = "ID", 
+           suffixes = c(".manual", ".ensemble"))
+
+# getting a scope problem; can access in browser ok
+# rs <- read_sheet("https://docs.google.com/spreadsheets/d/1m8n4JmcqwepWeBX8cPTvPFvmhpFxqJ5nZO8yc7m98vg/edit?gid=0#gid=0")
+
+rc <- read_csv("Sarusan-project-spatial-marker-genes - LIBD.csv")
+
+rc$ID %in% rownames(spe)
+
+ggplot(m, aes(F.manual,F.ensemble)) + 
+  geom_point() +
+  scale_x_log10(limits=c(50,3000)) + 
+  scale_y_log10(limits=c(50,3000)) +
+  geom_abline(colour="blue") +
+  geom_text_repel(data = m %>% 
+                    filter(ID %in% rc$ID), aes(label = ID),
+                  nudge_x = -.1, nudge_y = .1,
+                  colour = "blue")
+
+
+ggplot(m, aes(entropy.manual,entropy.ensemble)) + 
+  geom_point() +
+  # scale_x_log10(limits=c(50,3000)) + 
+  # scale_y_log10(limits=c(50,3000)) +
+  geom_abline(colour="blue") +
+  geom_text_repel(data = m %>% 
+                    filter(ID %in% rc$ID), aes(label = ID),
+                  nudge_x = -.1, nudge_y = .1,
+                  colour = "blue")
+
+```
