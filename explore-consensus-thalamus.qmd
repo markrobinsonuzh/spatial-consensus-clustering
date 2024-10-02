@@ -1,0 +1,558 @@
+---
+title: "exploring-consensus: thalamus"
+format: 
+    html:
+      toc: true
+      self-contained: true
+      highlight-style: github
+      code-line-numbers: true
+editor: source
+editor_options: 
+  chunk_output_type: console
+---
+
+## Load packages
+
+```{r}
+suppressPackageStartupMessages({
+  library(SpatialExperiment)
+  library(dplyr)
+  library(ggplot2)
+  library(cowplot)
+  library(clue)
+  library(khroma)
+  library(scran)
+  library(limma)
+  library(tibble)
+  #library(googlesheets4)
+  library(readr)
+  library(ggrepel)
+  library(mclust)
+  library(pheatmap)
+  library(fastDummies)
+  library(randomcoloR)
+})
+```
+
+
+## Define functions
+
+```{r}
+source("utils.R")
+```
+
+
+## Load data
+
+```{r}
+
+datadir <- "data/C57BL6J-638850_6800/"
+
+cons <- read.csv(file.path("data",
+                         "obs_Br8100_151673_consensus_r_stcc.tsv"),
+               header = T, row.names = 1, 
+               sep = "\t", check.names = FALSE) %>%
+  dplyr::select(-row, -col,
+                -contains("based"), -contains("KModes"))
+
+
+ss <- strsplit(colnames(cons),"_")
+method <- sapply(ss, .subset, 1)
+names(method) <- colnames(cons)
+method <- method[!(method %in% c("LCA","label"))]
+
+compare <- sapply(ss, .subset, 2)
+
+m <- match(method, compare)
+names(m) <- names(method)
+
+aris1 <- aris2 <- rep(NA, length(m))
+names(aris1) <- names(aris2) <- names(m)
+
+for(i in 1:length(m)) {
+  aris1[i] <- mclust::adjustedRandIndex(cons[,names(m)[i]],
+                            cons[,m[i]])
+  aris2[i] <- mclust::adjustedRandIndex(cons[,names(m)[i]],
+                            cons[,"label"])
+}
+
+d <- data.frame(ARI.consensus = aris1, 
+                ARI.ground_truth = aris2,
+                label = names(m))
+
+
+ggplot(d, aes(ARI.ground_truth,
+              ARI.consensus, label = label)) + 
+  geom_point(size = 4) +
+  geom_abline(colour="blue") +
+  geom_text_repel(size = 4,
+#                  nudge_x = -.1, nudge_y = .1,
+                  colour = "blue")
+
+
+
+spe <- get_SpatialExperiment(file.path(datadir, "features.tsv"), 
+                             file.path(datadir, "observations.tsv"), 
+                             file.path(datadir, "coordinates.tsv"), 
+                             file.path(datadir, "counts.mtx"))
+
+# not sure this is the best normalization
+spe <- logNormCounts(spe)
+rownames(spe) <- rowData(spe)$gene_name
+
+coords <- read_tsv(file.path(datadir, "coordinates.tsv"), 
+                   col_names = c("id","x","y","z"), 
+                   skip = 1)
+
+labels <- read_tsv(file.path(datadir, "labels.tsv"),
+                   col_names = c("id","label","label_confidence"),
+                   skip = 1)
+
+all(colnames(spe)==coords$id)
+
+spe$row <- coords$x
+spe$col <- coords$y
+
+
+# 
+obs <- read_tsv(file.path(datadir, "observations.tsv"),
+                   col_names = c("id","brain_section_label","average_correlation_score",
+                                 "class","cluster","cluster_alias","neurotransmitter",
+                                 "parcellation_division","parcellation_structure",
+                                 "parcellation_substructure","subclass","supertype"),
+                   skip = 1)
+
+apply(obs, 2, function(u) length(unique(u)))
+table(obs$class)
+table(obs$parcellation_division)
+table(obs$class, obs$neurotransmitter)
+table(obs$subclass)
+table(obs$parcellation_structure)
+table(obs$parcellation_substructure)
+
+
+
+lf <- list.files(datadir, pattern = "combined_domains.tsv$", 
+                 recursive = TRUE, full.names = TRUE)
+names(lf) <- lf
+
+base_clusterings <- lapply(lf, function(u) {
+  meth <- strsplit(u,"/", fixed = TRUE)[[1]][4:5] %>% 
+    paste0(collapse = "_")
+  meth <- gsub("_config","",meth) 
+  df <- read_tsv(u, col_names = c("id", paste0("n_clusters_",4:20)),
+           show_col_types = FALSE, skip = 1) %>%
+    mutate(n_clusters_15 = as.factor(n_clusters_15),
+           n_clusters_20 = as.factor(n_clusters_20)) %>%
+    dplyr::select(id, contains("_1"), contains("_20")) %>%
+    column_to_rownames("id") %>%
+    as.data.frame
+  colnames(df) <- gsub("n_clusters_", paste0(meth,"_"), 
+                       colnames(df))
+  df
+}) %>% bind_cols 
+
+```
+
+
+## Look at base clusterings
+
+```{r, fig.width=16, fig.height=12}
+
+real_n <- apply(base_clusterings, 2, function(u) length(unique(u)))
+
+base_clusterings_18 <- base_clusterings %>%
+  dplyr::select(names(which(real_n==18))) %>%
+  align_classes(ref = "SEDR_default_18")
+
+df <- base_clusterings_18 %>%
+  rownames_to_column("id") %>%
+  left_join(coords)
+
+palette <- distinctColorPalette(18)
+names(palette) <- 1:18
+
+# look at 6 NNs, entropy of their clusters
+mse <- apply(base_clusterings_18, 2, 
+             function(u) mean(spot_entropy(coords[,c("x","y")], u, k=6))) %>% sort
+
+mse
+
+
+df_mse <- data.frame(mse) %>% 
+  rownames_to_column("id") %>%
+  mutate(id = factor(id, levels=id))
+
+ggplot(df_mse, aes(id, mse)) + geom_point(size = 4) + 
+  ylab("mean spot entropy") + 
+  xlab("base clustering") +
+  theme(axis.text.x = element_text(angle = 45, 
+                                   vjust = 1, hjust=1))
+
+
+keepers <- head(mse, 8)
+
+
+lv <- levels(base_clusterings_18$SEDR_default_18)
+ps <- apply(base_clusterings_18[,names(keepers)], 1,
+            function(u) table(factor(u,levels = lv))) %>% t
+df$ent <- apply(ps, 1, calc_entropy)
+
+ggplot(df, aes(x,y,colour=ent)) + 
+  geom_point(size = 2) +
+  scale_colour_gradient(low="white", high="deeppink4") +
+  #theme_classic() +
+  theme(legend.position = "bottom") +
+  scale_x_continuous(expand = expansion(0,1)) +
+  scale_y_continuous(expand = expansion(0,1)) +
+  coord_fixed()
+
+df <- df %>% left_join(obs)
+
+# df$class <- factor(df$class)
+# levels(df$class) <- 1:length(levels(df$class))
+# 
+# df$subclass <- factor(df$subclass)
+# levels(df$subclass) <- 1:length(levels(df$subclass))
+# 
+# df$parcellation_division_rc <- factor(df$parcellation_division)
+# levels(df$parcellation_division_rc) <- 1:length(levels(df$parcellation_division_rc))
+# 
+# df$parcellation_structure_rc <- factor(df$parcellation_structure)
+# levels(df$parcellation_structure_rc) <- 1:length(levels(df$parcellation_structure_rc))
+# 
+# df$parcellation_substructure <- factor(df$parcellation_substructure)
+# levels(df$parcellation_substructure) <- 1:length(levels(df$parcellation_substructure))
+# 
+# df$supertype <- factor(df$supertype)
+# levels(df$supertype) <- 1:length(levels(df$supertype))
+
+
+palette <- distinctColorPalette(18)
+names(palette) <- 1:18
+
+ps <- lapply(names(keepers), function(u) {
+  ggplot(df, aes(x=x, y=y, colour=.data[[u]])) + geom_point(size = 1) +
+  theme_classic() +
+  theme(legend.position = "none") +
+  xlab("") + ylab("") +
+  scale_colour_manual(values = palette) +
+  scale_x_continuous(expand = expansion(0,1)) +
+  scale_y_continuous(expand = expansion(0,1)) +
+    ggtitle(u) + coord_fixed()
+})
+plot_grid(plotlist = ps, nrow=2, ncol=4)
+
+
+# ps <- lapply(c(names(keepers),"class","subclass",
+#                "parcellation_division_rc",
+#                "parcellation_structure_rc",
+#                "parcellation_substructure","supertype"), function(u) {
+#   ggplot(df, aes(x=x, y=y, colour=.data[[u]])) + geom_point(size = 1) +
+#   theme_classic() +
+#   theme(legend.position = "none") +
+#   xlab("") + ylab("") +
+#   scale_colour_manual(values = palette) +
+#   scale_x_continuous(expand = expansion(0,1)) +
+#   scale_y_continuous(expand = expansion(0,1)) +
+#     ggtitle(u)
+# })
+# 
+# plot_grid(plotlist = ps, nrow=3, ncol=5)
+
+
+df$parcellation_division <- factor(df$parcellation_division)
+
+palette <- distinctColorPalette(length(levels(df$parcellation_division)))
+names(palette) <- levels(df$parcellation_division)
+
+p <- ggplot(df, aes(x=x, y=y, colour=parcellation_division)) + 
+  geom_point(size = 1) +
+  theme_classic() +
+  # theme(legend.key.size = unit(10,"points")) +
+  theme(legend.position = "bottom") +
+  xlab("") + ylab("") +
+  scale_colour_manual(values = palette) +
+  scale_x_continuous(expand = expansion(0,1)) +
+  scale_y_continuous(expand = expansion(0,1)) 
+
+pa <- ggplot(df, aes(x=x, y=y, colour=parcellation_structure=="ZI")) + 
+  geom_point(size = 1) +
+  theme_classic() +
+  # theme(legend.key.size = unit(10,"points")) +
+  theme(legend.position = "bottom") +
+  xlab("") + ylab("") +
+  scale_x_continuous(expand = expansion(0,1)) +
+  scale_y_continuous(expand = expansion(0,1)) 
+
+q <- ggplot(df, aes(x=x, y=y, colour=parcellation_division=="TH" | parcellation_structure=="ZI")) + 
+  geom_point(size = 1) +
+  theme_classic() +
+  # theme(legend.key.size = unit(10,"points")) +
+  theme(legend.position = "bottom") +
+  xlab("") + ylab("") +
+  # scale_colour_manual(values = palette) +
+  scale_x_continuous(expand = expansion(0,1)) +
+  scale_y_continuous(expand = expansion(0,1))
+
+cowplot::plot_grid(p,pa,q, nrow=1)
+
+# base_clusterings_20 <- base_clusterings %>%
+#   select(contains("_20")) %>%
+#   align_classes(ref = "SEDR_default_20")
+# 
+# df <- base_clusterings_20 %>%
+#   rownames_to_column("id") %>%
+#   left_join(coords)
+# 
+# palette <- distinctColorPalette(20)
+# names(palette) <- 1:20
+# 
+# mse <- apply(base_clusterings_20, 2, 
+#              function(u) mean(spot_entropy(coords[,c("x","y")], u, k=6))) %>% sort
+# 
+# ps <- lapply(names(mse), function(u) {
+#   ggplot(df, aes(x=x, y=y, colour=.data[[u]])) + geom_point(size = 1) +
+#   theme_classic() +
+#   theme(legend.position = "none") +
+#   xlab("") + ylab("") +
+#   scale_colour_manual(values = palette) +
+#   scale_x_continuous(expand = expansion(0,1)) +
+#   scale_y_continuous(expand = expansion(0,1)) +
+#     ggtitle(u)
+# })
+# 
+# plot_grid(plotlist = ps, nrow=3, ncol=5)
+# 
+
+```
+
+
+## Visualize tree
+
+
+```{r, fig.width=16, fig.height=12}
+
+my_base_clusterings <- base_clusterings %>%
+  dplyr::select(contains("_20"), contains("_19"))
+  #dplyr::select(contains("_18"), contains("_20"))
+
+
+cols <- sapply(gsub("_20","_",colnames(my_base_clusterings)), function(u) {
+  grep(u, colnames(my_base_clusterings))  
+}, simplify = FALSE)
+
+cols <- cols %>% unlist %>% unique
+
+
+arism <- calc_aris(cbind(my_base_clusterings[,cols], 
+                         obs[,c("class","subclass","parcellation_division",
+                                "parcellation_structure",
+                                "parcellation_substructure", "supertype")]))
+
+ph <- pheatmap(arism)
+
+
+df <- my_base_clusterings[,cols] %>%
+  rownames_to_column("id") %>%
+  left_join(coords)
+```
+
+
+## Form consensus
+
+```{r}
+
+# # bit slow
+# system.time(df$consensus_lca <- diceR:::LCA(my_base_clusterings[,cols],
+#                              is.relabelled = FALSE, seed = 100))
+# 
+# saveRDS(df, paste0("df_",gsub(" ","-",date()),".rds"))
+# spe$consensus_lca <- df$consensus_lca
+
+
+system.time(df$consensus_kmodes <- diceR:::k_modes(my_base_clusterings[,cols],
+                             is.relabelled = FALSE, seed = 1))
+saveRDS(df, paste0("df_",gsub(" ","-",date()),".rds"))
+spe$consensus_kmodes <- factor(df$consensus_kmodes)
+
+df <- cbind(df, obs[,c("parcellation_structure",
+                       "parcellation_substructure")])
+
+
+df$parcellation_structure <- factor(df$parcellation_structure)
+levels(df$parcellation_structure) <- 1:length(levels(df$parcellation_structure))
+df$parcellation_substructure <- factor(df$parcellation_substructure)
+levels(df$parcellation_substructure) <- 1:length(levels(df$parcellation_substructure))
+
+
+palette <- distinctColorPalette(20)
+names(palette) <- 1:20
+
+# df1 <- my_base_clusterings[,cols] %>%
+#   rownames_to_column("id") %>%
+#   left_join(df, by = "id")
+
+
+plot_cols <- c(grep("_19", colnames(df), value = TRUE),
+               "consensus_kmodes", #"consensus_lca",
+               "parcellation_structure",
+               "parcellation_substructure")
+
+# plot_cols <- c("consensus_kmodes", "consensus_lca",
+#                "parcellation_structure",
+#                "parcellation_substructure")
+
+plot_cols <- c("consensus_kmodes", "parcellation_structure")
+
+
+ps <- lapply(plot_cols, function(u) {
+  ggplot(df, aes(x=x, y=y, colour=as.factor(.data[[u]]))) + 
+    geom_point(size = 1) +
+    theme_classic() +
+    theme(legend.position = "none") +
+    xlab("") + ylab("") +
+    scale_colour_manual(values = palette) +
+    scale_x_continuous(expand = expansion(0,1)) +
+    scale_y_continuous(expand = expansion(0,1)) +
+    ggtitle(u)
+})
+
+plot_grid(plotlist = ps, nrow=1, ncol=2)
+
+
+df2 <- df %>% dplyr::select(STAGATE_default_19, 
+                                    #consensus_lca, 
+                                    consensus_kmodes) %>%
+  align_classes(ref="consensus_kmodes") %>%
+  cbind(df[,c("x","y")])
+
+# ps <- lapply(c("consensus_kmodes", "consensus_lca"), function(u) {
+ps <- lapply(c("consensus_kmodes"), function(u) {
+  ggplot(df2, aes(x=x, y=y, colour=as.factor(.data[[u]]))) + 
+    geom_point(size = 2) +
+    theme_classic() +
+    theme(legend.position = "none") +
+    xlab("") + ylab("") +
+    scale_colour_manual(values = palette) +
+    scale_x_continuous(expand = expansion(0,1)) +
+    scale_y_continuous(expand = expansion(0,1)) +
+    ggtitle(u)
+})
+
+plot_grid(plotlist = ps, nrow=1, ncol=1)
+
+
+
+
+```
+
+
+## Explore DE statistics
+
+```{r}
+
+cd <- colData(spe)
+
+mm1 <- model.matrix(~parcellation_structure, data=cd)
+mm2 <- model.matrix(~consensus_kmodes, data=cd)
+mm1a <- model.matrix(~0+parcellation_structure, data=cd)
+mm2a <- model.matrix(~0+consensus_kmodes, data=cd)
+
+
+lcounts <- as.matrix(logcounts(spe))
+
+f1 <- lmFit(lcounts, mm1)
+f1 <- eBayes(f1, trend = TRUE)
+f2 <- lmFit(lcounts, mm2)
+f2 <- eBayes(f2, trend = TRUE)
+f1a <- lmFit(lcounts, mm1a)
+f1a <- eBayes(f1a, trend = TRUE)
+f2a <- lmFit(lcounts, mm2a)
+f2a <- eBayes(f2a, trend = TRUE)
+
+tt1 <- topTable(f1, coef=2:ncol(f1$design), sort.by = "none", n = Inf)
+tt2 <- topTable(f2, coef=2:ncol(f2$design), sort.by = "none", n = Inf)
+
+tt1 %>% arrange(desc(F)) %>% head(10)
+tt2 %>% arrange(desc(F)) %>% head(10)
+
+# aac1 <- aggregateAcrossCells(spe, spe$parcellation_structure) %>% counts
+# aac2 <- aggregateAcrossCells(spe, spe$consensus_kmodes) %>% counts
+
+
+df1 <- data.frame(ID = rownames(tt1), F=tt1[,c("F")])
+df2 <- data.frame(ID = rownames(tt2), F=tt2[,c("F")])
+
+all(df1$ID==df2$ID)
+
+m <- merge(df1, df2, by = "ID", 
+           suffixes = c(".anatomical", ".ensemble"))
+head(m,3)
+
+ggplot(m, aes(F.anatomical, F.ensemble)) + 
+  geom_point() +
+  scale_x_log10() +
+  scale_y_log10() +
+  geom_abline(colour="blue") +
+  geom_text_repel(data = m %>% filter(ID %in% c("Slc32a1")), 
+                  aes(label = ID), size = 5,
+                  nudge_x = -.1, nudge_y = .1,
+                  colour = "blue")
+
+
+
+gt_col <- c("TRUE" = "green", 
+            "FALSE" = "white")
+
+plot(f1$sigma, f2$sigma, log="xy"); abline(0,1)
+
+
+genes <- c("Slc32a1", "Tcf7l2", "Nwd2")
+clusters <- list(c(4,9), c(1), c(3,11,13))
+gt <- spe$consensus_kmodes
+# ps <- mapply(plotter_fun, genes, clusters, titlabels, SIMPLIFY = FALSE)
+
+plotter_fun(genes[1], clusters[[1]], "consensus", point_size = 2)
+
+# plotter_fun(genes[2], clusters[[2]], "consensus", point_size = 2)
+
+plotter_fun(genes[3], clusters[[3]], "consensus", point_size = 2)
+
+
+gt <- spe$parcellation_structure
+
+clusts <- gsub("parcellation_structure","",
+               names(which(f1a$coefficients["Slc32a1",]>3)))
+plotter_fun(genes[1], clusts, "parcellation_structure", point_size = 2)
+
+# clusts <- "brain-unassigned"
+# plotter_fun(genes[2], clusts, "parcellation_structure", point_size = 2)
+
+clusts <- gsub("parcellation_structure","",
+               names(which(f1$coefficients["Nwd2",]>1)))
+barplot(f1$coefficients["Nwd2",])
+plotter_fun(genes[3], clusts, "parcellation_structure", point_size = 2)
+
+
+rn <- tt2 %>% arrange(desc(F)) %>% head(60) %>% rownames
+pheatmap(f2a$coefficients[rn,], scale = "none")
+
+```
+
+
+## Overall view
+
+```{r}
+
+```
+
+
+
+
+## sessionInfo()
+
+```{r}
+sessionInfo()
+```
+
