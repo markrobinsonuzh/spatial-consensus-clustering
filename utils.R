@@ -41,6 +41,16 @@ calc_summary <- function(tree, arism, k = 3, gtcol = "label") {
 }
 
 
+save_pheatmap_pdf <- function(x, filename, width=7, height=7) {
+  stopifnot(!missing(x))
+  stopifnot(!missing(filename))
+  pdf(filename, width=width, height=height)
+  grid::grid.newpage()
+  grid::grid.draw(x$gtable)
+  dev.off()
+}
+
+
 align_classes <- function(d, ref) {
   
   bcs <- d %>% as.data.frame
@@ -70,7 +80,7 @@ align_classes <- function(d, ref) {
 }
 
 spot_entropy <- function(spatial_coords, label, k=6) {
-  require(dbscan)
+  suppressPackageStartupMessages(require(dbscan))
   knns <- kNN(spatial_coords, k=k)
   label <- as.factor(label)
   neighb_labels <- apply(knns$id, 2, function(u) label[u])

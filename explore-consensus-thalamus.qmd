@@ -48,46 +48,46 @@ source("utils.R")
 
 datadir <- "data/C57BL6J-638850_6800/"
 
-cons <- read.csv(file.path("data",
-                         "obs_Br8100_151673_consensus_r_stcc.tsv"),
-               header = T, row.names = 1, 
-               sep = "\t", check.names = FALSE) %>%
-  dplyr::select(-row, -col,
-                -contains("based"), -contains("KModes"))
+# cons <- read.csv(file.path("data",
+#                          "obs_Br8100_151673_consensus_r_stcc.tsv"),
+#                header = T, row.names = 1, 
+#                sep = "\t", check.names = FALSE) %>%
+#   dplyr::select(-row, -col,
+#                 -contains("based"), -contains("KModes"))
+# 
+# 
+# ss <- strsplit(colnames(cons),"_")
+# method <- sapply(ss, .subset, 1)
+# names(method) <- colnames(cons)
+# method <- method[!(method %in% c("LCA","label"))]
+# 
+# compare <- sapply(ss, .subset, 2)
+# 
+# m <- match(method, compare)
+# names(m) <- names(method)
+# 
+# aris1 <- aris2 <- rep(NA, length(m))
+# names(aris1) <- names(aris2) <- names(m)
+# 
+# for(i in 1:length(m)) {
+#   aris1[i] <- mclust::adjustedRandIndex(cons[,names(m)[i]],
+#                             cons[,m[i]])
+#   aris2[i] <- mclust::adjustedRandIndex(cons[,names(m)[i]],
+#                             cons[,"label"])
+# }
 
-
-ss <- strsplit(colnames(cons),"_")
-method <- sapply(ss, .subset, 1)
-names(method) <- colnames(cons)
-method <- method[!(method %in% c("LCA","label"))]
-
-compare <- sapply(ss, .subset, 2)
-
-m <- match(method, compare)
-names(m) <- names(method)
-
-aris1 <- aris2 <- rep(NA, length(m))
-names(aris1) <- names(aris2) <- names(m)
-
-for(i in 1:length(m)) {
-  aris1[i] <- mclust::adjustedRandIndex(cons[,names(m)[i]],
-                            cons[,m[i]])
-  aris2[i] <- mclust::adjustedRandIndex(cons[,names(m)[i]],
-                            cons[,"label"])
-}
-
-d <- data.frame(ARI.consensus = aris1, 
-                ARI.ground_truth = aris2,
-                label = names(m))
-
-
-ggplot(d, aes(ARI.ground_truth,
-              ARI.consensus, label = label)) + 
-  geom_point(size = 4) +
-  geom_abline(colour="blue") +
-  geom_text_repel(size = 4,
-#                  nudge_x = -.1, nudge_y = .1,
-                  colour = "blue")
+# d <- data.frame(ARI.consensus = aris1, 
+#                 ARI.ground_truth = aris2,
+#                 label = names(m))
+# 
+# 
+# ggplot(d, aes(ARI.ground_truth,
+#               ARI.consensus, label = label)) + 
+#   geom_point(size = 4) +
+#   geom_abline(colour="blue") +
+#   geom_text_repel(size = 4,
+# #                  nudge_x = -.1, nudge_y = .1,
+#                   colour = "blue")
 
 
 
