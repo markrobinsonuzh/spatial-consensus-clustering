@@ -6,12 +6,17 @@ calc_entropy <- function(u) {
 
 
 # given a matrix of labels, calculate all pairwise ARIs
-calc_aris <- function(m) {
-  require(mclust)
+calc_aris <- function(m, flavour="ARI") {
   a <- diag(ncol(m))
   for(i in 1:(ncol(m)-1))
-    for(j in 2:ncol(m))
-      a[i,j] <- a[j,i] <- mclust::adjustedRandIndex(m[,i], m[,j])
+    for(j in 2:ncol(m)) {
+      if(flavour=="ARI") {
+        require(mclust)
+        a[i,j] <- a[j,i] <- mclust::adjustedRandIndex(m[,i], m[,j])
+      } else if(flavour=="sARI") {
+        
+      }
+    }
   rownames(a) <- colnames(a) <- colnames(m)
   a
 }
