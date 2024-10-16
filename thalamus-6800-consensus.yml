@@ -1,0 +1,8 @@
+name: thalamus-6800
+datadir: data/C57BL6J-638850_6800
+nclust: 17
+nmethod: 5
+ground_truth:
+  - parcellation_structure
+  - parcellation_substructure
+nns: 6

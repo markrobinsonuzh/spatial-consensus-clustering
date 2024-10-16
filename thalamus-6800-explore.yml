@@ -21,3 +21,5 @@ ground_truth:
   - parcellation_structure
   - parcellation_substructure
 nns: 6
+nsmoothest: 30
+obs_filter: parcellation_division=="TH" | parcellation_structure=="ZI"

@@ -1,8 +1,7 @@
 ---
 title: |
-  Consensus clustering report \
-  slice: `r basename(params$datadir)` \
-  number-of-clusters: `r params$nclust`
+  Consensus clustering exploration \
+  slice: `r basename(params$datadir)`
 format: 
     html:
       toc: true
@@ -15,7 +14,6 @@ editor_options:
   chunk_output_type: console
 params:
   datadir: 'test'
-  ref_clustering: "none"
   nmethod_range:
     - 5
     - 8
@@ -27,6 +25,8 @@ params:
   nclust_range:
     - 10
     - 12
+  nsmoothest: 30
+  obs_filter: NULL
 ---
 
 ## Retrieve parameters
@@ -39,6 +39,8 @@ k <- params$nns
 nclust_range <- params$nclust_range
 nmethod_range <- params$nmethod_range
 name <- params$name
+nsmoothest <- params$nsmoothest
+obs_filter <- params$obs_filter
 
 # # for testing
 # datadir <- "data/C57BL6J-638850_6800"
@@ -48,6 +50,8 @@ name <- params$name
 # name <- "thalamus-6800"
 # nclust_range <- c(14,15,16,17,18,19,20)
 # nmethod_range <- c(4,5,6,7,8,9)
+# nsmoothest <- c(30)
+# obs_filter <- 'parcellation_division=="TH" | parcellation_structure=="ZI"'
 
 ```
 
@@ -99,8 +103,11 @@ suppressMessages(obs <- read_tsv(file.path(datadir, "observations.tsv"),
                                  show_col_types = FALSE))
 colnames(obs)[1] <- "id"
 
-obs <- obs %>% 
-  dplyr::filter(parcellation_division=="TH" | parcellation_structure=="ZI")
+# somewhat of a hack (for thalamus) to remove unconfident labels
+if(!is.null(obs_filter)) {
+  obs <- obs %>%
+  dplyr::filter(eval(parse(text = obs_filter)))
+}
 
 ap <- apply(obs[,-1], 2, function(u) length(unique(u)))
 ap[gt]
@@ -147,7 +154,6 @@ fn_stub <- paste0(name, "_", paste0(nclust_range, collapse = "-"))
 # find number of actual clusters per column
 real_n <- apply(base_clusterings, 2, 
                 function(u) length(unique(u)))
-
 
 # focus on clusterings at single number of clusters, loop through
 p <- vector("list", length = length(nclust_range))
@@ -205,9 +211,6 @@ for(nclust in nclust_range) {
   count <- count+1
 
 }
-
-# ggsave(paste0(fn_stub, "_01_smoothness-entropy.pdf"), 
-#        plot = plot_grid(plotlist = p, nrow=2, ncol=2))
 
 ggsave(filename = paste0(fn_stub, "_01_smoothness-entropy.pdf"),
        plot = marrangeGrob(p, nrow=1, ncol=1),
@@ -285,10 +288,9 @@ pheatmap(cents, cluster_rows = FALSE,
 
 ```{r base-clusterings-viz, fig.width=10, fig.height=10, eval=TRUE}
 
-hist(all_mses, 50); abline(v=.18, lwd=4, col="blue")
-
-bases <- all_mses %>% sort %>% head(20)
-bcs <- vector("list", length(bases))
+bases <- all_mses %>% sort %>% head(nsmoothest)
+bcs <- vector("list", length(bases)*length(gt))
+count <- 1
 
 for(i in 1:length(bases)) {
   
@@ -309,164 +311,99 @@ for(i in 1:length(bases)) {
     scale_x_continuous(expand = expansion(0,1)) +
     scale_y_continuous(expand = expansion(0,1)) +
     ggtitle(nm) + coord_fixed()
-
-  sem <- getSpatialExternalMetrics(true = as.factor(obs$parcellation_structure),
-                                   pred = base_clusterings[[nm]], 
-                                   location = df[,c("row","col")],
-                                   metrics = "spotAgreement",
-                                   level = "element", k = 15,
-                                   useNegatives = FALSE)
-  df$spot_agreement <- sem$spotAgreement
   
-  bb <- ggplot(df, aes(row, col, colour = spot_agreement)) + 
-    geom_point(size = .5) + 
-    scale_colour_gradient(low="gray90", high="deeppink4") +
-    theme(legend.position = "none") +
-    scale_x_continuous(expand = expansion(0,1)) +
-    scale_y_continuous(expand = expansion(0,1)) +
-    theme_classic() +
-    theme(legend.position = "none") +
-    xlab("") + ylab("") +
-    coord_fixed() +
-    ggtitle("spotAgreement")
+  for(j in 1:length(gt)) {
+    
+    sem <- getSpatialExternalMetrics(true = as.factor(obs[[gt[j]]]),
+                                     pred = base_clusterings[[nm]], 
+                                     location = df[,c("row","col")],
+                                     metrics = "spotAgreement",
+                                     level = "element", k = k,
+                                     useNegatives = FALSE)
+    df$spot_agreement <- sem$spotAgreement
 
-  cc <- ggplot(df, aes(row, col, colour = 1-spot_agreement)) + 
-    geom_point(size = .5) + 
-    scale_colour_gradient(low="gray90", high="deeppink4") +
-    theme(legend.position = "none") +
-    scale_x_continuous(expand = expansion(0,1)) +
-    scale_y_continuous(expand = expansion(0,1)) +
-    theme_classic() +
-    theme(legend.position = "none") +
-    xlab("") + ylab("") +
-    coord_fixed() +
-    ggtitle("1-spotAgreement")
-  
-  df$ground_truth <- as.factor(obs[[gt[1]]])
-  ngt <- length(unique(df$ground_truth))
-  set.seed(1234)
-  palette <- distinctColorPalette(ngt)
-  names(palette) <- levels(df$gt)
+    bb <- ggplot(df, aes(row, col, colour = spot_agreement)) + 
+      geom_point(size = .5) + 
+      scale_colour_gradient(low="gray90", high="deeppink4") +
+      theme(legend.position = "none") +
+      scale_x_continuous(expand = expansion(0,1)) +
+      scale_y_continuous(expand = expansion(0,1)) +
+      theme_classic() +
+      theme(legend.position = "none") +
+      xlab("") + ylab("") +
+      coord_fixed() +
+      ggtitle("spotAgreement")
+    
+    cc <- ggplot(df, aes(row, col, colour = 1-spot_agreement)) + 
+      geom_point(size = .5) +
+      scale_colour_gradient(low="gray90", high="deeppink4") +
+      theme(legend.position = "none") +
+      scale_x_continuous(expand = expansion(0,1)) +
+      scale_y_continuous(expand = expansion(0,1)) +
+      theme_classic() +
+      theme(legend.position = "none") +
+      xlab("") + ylab("") +
+      coord_fixed() +
+      ggtitle("1-spotAgreement")
+    
+    df$ground_truth <- as.factor(obs[[gt[j]]])
+    ngt <- length(unique(df$ground_truth))
+    set.seed(1234)
+    palette <- distinctColorPalette(ngt)
+    names(palette) <- levels(df$gt)
+    
+    dd <- ggplot(df, aes(x=row, y=col, colour=ground_truth)) + 
+      geom_point(size = .5) +
+      theme_classic() +
+      theme(legend.position = "none") +
+      xlab("") + ylab("") +
+      scale_colour_manual(values = palette) +
+      scale_x_continuous(expand = expansion(0,1)) +
+      scale_y_continuous(expand = expansion(0,1)) +
+      ggtitle(gt[j]) + coord_fixed()
+    
+    bcs[[count]] <- plot_grid(aa,dd,bb,cc, nrow=2, ncol=2)
+    show(bcs[[count]])
+    count <- count+1
 
-
-  dd <- ggplot(df, aes(x=row, y=col, colour=ground_truth)) + 
-    geom_point(size = .5) +
-    theme_classic() +
-    theme(legend.position = "none") +
-    xlab("") + ylab("") +
-    scale_colour_manual(values = palette) +
-    scale_x_continuous(expand = expansion(0,1)) +
-    scale_y_continuous(expand = expansion(0,1)) +
-    ggtitle(gt[1]) + coord_fixed()
-
-  bcs[[i]] <- plot_grid(aa,dd,bb,cc, nrow=2, ncol=2)
-  show(bcs[[i]])
-
+  }
 
 }
-
 
 ggsave(filename = paste0(fn_stub, "_03-base-clusterings.pdf"),
        plot = marrangeGrob(bcs, nrow=1, ncol=1),
        width = 9, height = 6)
 
-
-# psa <- lapply(keepers, function(u) {
-#   ggplot(df, aes(x=row, y=col, colour=as.factor(.data[[u]]))) + 
-#     geom_point(size = .5) +
-#     theme_classic() +
-#     theme(legend.position = "none") +
-#     xlab("") + ylab("") +
-#     scale_colour_manual(values = palette) +
-#     scale_x_continuous(expand = expansion(0,1)) +
-#     scale_y_continuous(expand = expansion(0,1)) +
-#     ggtitle(u) + coord_fixed()
-# })
-# b <- plot_grid(plotlist = psa, nrow=3, ncol=3)
-# show(b)
-
-# ggsave(paste0(fn_stub, "_03-base-clusterings.pdf"), plot = b)
-
 ```
 
 
-## Similarity: all base clusterings (NOT DONE)
-
-
-```{r all-clusterings, fig.height=7, fig.width=9}
-# aris_all <- calc_aris(cbind(base_clusterings,obs[,gt]))
-# ph_all <- pheatmap(aris_all, fontsize = 12)
-# save_pheatmap_pdf(ph_all, paste0(fn_stub, "_04-heatmap-all.pdf"), width = 9)
-
-```
-
-
-## Similarity: "smoothest" `r params$nmethod` clusterings
+## Similarity: "smoothest" clusterings
 
 ```{r smoothest-clusterings, fig.height=7, fig.width=8}
-keepers <- names(which(all_mses < .18))
-# aris_sel <- calc_aris(cbind(base_clusterings[,keepers],
-#                             obs[,gt]))
-aris_sel <- calc_aris(base_clusterings[,keepers])
-ph_sel <- pheatmap(aris_sel, fontsize = 12)
-save_pheatmap_pdf(ph_sel, paste0(fn_stub, "_05-heatmap-selected.pdf"), width = 8)
+keepers <- names(bases)
+aris_sel <- calc_aris(cbind(base_clusterings[,keepers],
+                            obs[,gt]))
+# aris_sel <- calc_aris(base_clusterings[,keepers])
+ph_sel <- pheatmap(aris_sel, fontsize = 10)
+save_pheatmap_pdf(ph_sel, paste0(fn_stub, "_04-heatmap-selected.pdf"), width = 8)
 ```
 
-## Form consensus (NOT DONE)
 
-```{r form-consensus, fig.height=6, fig.width=10, eval=FALSE}
+## Assemble artifacts, write to file
 
-# # bit slow
-# system.time(df$consensus_lca <- diceR:::LCA(base_clusterings[,keepers],
-#                              is.relabelled = FALSE, seed = 100))
-# 
-# saveRDS(df, paste0("df_",gsub(" ","-",date()),".rds"))
-# spe$consensus_lca <- df$consensus_lca
+```{r assemble-dataframe}
 
-system.time(df$consensus_kmodes <- diceR:::k_modes(base_clusterings[,keepers],
-                             is.relabelled = FALSE, seed = 1))
-saveRDS(df, paste0("df_",gsub(" ","-",date()),".rds"))
-spe$consensus_kmodes <- factor(df$consensus_kmodes)
+out_df <- cbind(coords, base_clusterings[,names(all_mses)], 
+                obs[,gt])
 
-df <- df %>% left_join(obs %>% dplyr::select(id, all_of(gt)), by="id")
+saveRDS(out_df, 
+        file.path(datadir, paste0("df_", name, ".rds")))
+saveRDS(all_mses, 
+        file.path(datadir, paste0("spot-entropies_", name, ".rds")))
 
-# plot_cols <- c("consensus_lca","consensus_kmodes", gt)
-plot_cols <- c("consensus_kmodes", gt)
-
-pal1 <- distinctColorPalette(nclust)
-names(pal1) <- 1:nclust
-# pal2 <- distinctColorPalette(max(ap[gt]))
-# names(pal2) <- obs %>% pull(names(ap[gt][which.max(ap[gt])])) %>% unique
-gt_cats <- unique(as.character(obs[,gt] %>% as.matrix))
-pal2 <- distinctColorPalette(length(gt_cats))
-names(pal2) <- gt_cats
-palette <- c(pal1, pal2)
-
-psb <- lapply(plot_cols, function(u) {
-  se <- spot_entropy(coords[,c("row","col")],
-                     df[[u]], k=k)
-  ggplot(df, aes(x=row, y=col, colour=as.factor(.data[[u]]))) +
-    geom_point(size = .5) +
-    theme_classic() +
-    theme(legend.position = "none") +
-    xlab("") + ylab("") +
-    scale_colour_manual(values = palette) +
-    scale_x_continuous(expand = expansion(0,1)) +
-    scale_y_continuous(expand = expansion(0,1)) +
-    ggtitle(paste0(u, " (avg-entropy=", 
-                   round(mean(se),4), ")")) +
-    coord_fixed()
-})
-
-x <- plot_grid(plotlist = psb, ncol=2)
-show(x)
-ggsave(paste0(fn_stub, "_06-consensus.pdf"), plot = x, 
-       width = 10, height = 6)
-
-
-plot_grid(plotlist = list(psa[[1]], psb[[2]], y, z), ncol = 2)
 
 ```
+
 
 ## sessionInfo()
 
