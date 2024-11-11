@@ -1,0 +1,3 @@
+#quarto render ensemble-pipeline-01-explore.qmd --execute-params yml/thalamus-6400-explore.yml --output thalamus-6400-explore.html
+quarto render ensemble-pipeline-01-explore.qmd --execute-params yml/thalamus-6800-explore.yml --output thalamus-6800-explore.html
+#quarto render ensemble-pipeline-01-explore.qmd --execute-params yml/thalamus-6800-explore.yml --output thalamus-6800-explore.html

@@ -1,0 +1,19 @@
+name: thalamus-6400
+datadir: data/abc_atlas_wmb_thalamus/C57BL6J-638850_6400
+nclust_range: 
+  - 16
+  - 20
+  - 24
+nmethod_range:
+  - 3
+  - 4
+  - 5
+  - 6
+  - 7
+  - 8
+ground_truth:
+  - parcellation_structure
+  - parcellation_substructure
+nns: 6
+nsmoothest: 30
+obs_filter: parcellation_division=="TH" | parcellation_structure=="ZI"
