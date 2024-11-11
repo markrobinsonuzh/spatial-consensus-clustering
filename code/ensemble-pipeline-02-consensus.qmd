@@ -1,0 +1,259 @@
+---
+title: |
+  Consensus clustering report \
+  slice: `r basename(params$datadir)` \
+  number-of-clusters: `r params$nclust` \
+  number-of-methods: `r params$nmethod`
+format: 
+    html:
+      toc: true
+      self-contained: true
+      highlight-style: github
+      code-line-numbers: true
+      code-fold: true
+editor: source
+editor_options: 
+  chunk_output_type: console
+params:
+  datadir: 'test'
+  nmethod: 5
+  ground_truth:
+    - x
+    - y
+  nns: 6
+  name: "noname"
+  nclust: 16
+---
+
+## Retrieve parameters
+
+```{r display-params}
+params
+name <- params$name
+datadir <- params$datadir
+gt <- params$ground_truth
+nclust <- params$nclust
+nmethod <- params$nmethod
+k <- params$nns
+
+# # for testing
+# name <- "thalamus-6800"
+# datadir <- "data/C57BL6J-638850_6800"
+# gt <- c("parcellation_structure","parcellation_substructure")
+# nclust <- 17
+# nmethod <- 5
+# k <- 6
+
+```
+
+## Packages / functions
+
+```{r load-packages}
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(ggplot2)
+  library(cowplot)
+  library(clue)
+  library(khroma)
+  library(scran)
+  library(limma)
+  library(tibble)
+  library(readr)
+  library(ggrepel)
+  library(mclust)
+  library(pheatmap)
+  library(fastDummies)
+  library(randomcoloR)
+  library(reshape2)
+  library(ClusteringMetrics)
+  library(gridExtra)
+})
+source("utils.R")
+```
+
+
+## Load data
+
+```{r load-data}
+
+df <- readRDS(file.path(datadir, paste0("df_", name, ".rds")))
+mses <- readRDS(file.path(datadir, paste0("spot-entropies_", name, ".rds")))
+
+# organize a few data frames from previous outputs
+coords <- df[,c("row","col")]
+obs <- df[,gt]
+base_clusterings <- df[,names(mses)]
+
+fn_stub <- paste0(name, "_nclust-", nclust, "_nmeth-", nmethod)
+
+# arism <- calc_aris(base_clusterings[,mses < .18])
+
+base_clusterings <- base_clusterings+1
+
+keep <- mses[mses < .18]
+sw <- seq(4,20,by=2)
+tm <- m <- matrix(NA, nrow=5, ncol=length(sw))
+colnames(tm) <- colnames(m) <- sw
+
+set.seed(1976)
+
+library(diceR)
+
+
+# library(foreach)
+# library(parallel)
+# library(doParallel)
+# 
+# cores=detectCores()
+# cl <- makeCluster(cores[1]-1) #not to overload your computer
+# registerDoParallel(cl)
+# foreach(j=1:ncol(m)) %dopar% {
+  
+for(j in 1:ncol(m)) {
+  cat(sw[j],":\n")
+  for(i in 1:nrow(m)) {
+    cat(i," ")
+    meths <- sample(names(keep), sw[j])
+    
+    ptm <- proc.time()
+
+    tc <-   tryCatch(
+        #try to do this
+        { LCA(base_clusterings[,meths],is.relabelled = FALSE, seed = 100)},
+        error=function(e) { message('Error. Skipping.')   #print(e)  
+          },
+        warning=function(w) { message('A Warning Occurred'); print(w); return(NA) }
+    )
+    
+    if(!(c("error") %in% class(tc))) {
+      tm[i,j] <- (proc.time() - ptm)[3]
+      m[i,j] <- mean(spot_entropy(coords,tc,k=k))
+    }
+
+  }
+  cat("\n")
+}
+
+
+        
+        
+
+```
+
+
+## Select base clusterings
+
+```{r smoothness-entropy, fig.width=8, fig.height=6, eval=TRUE}
+
+# find number of actual clusters per column
+real_n <- apply(base_clusterings, 2, 
+                function(u) length(unique(u)))
+real_n <- real_n[which(real_n == nclust)]
+
+meths <- mses[names(real_n)] %>% sort %>% head(nmethod)
+
+base_clusterings <- base_clusterings %>%
+  dplyr::select(names(meths)) %>%
+  align_classes(names(meths)[1])
+
+dim(base_clusterings)
+
+```
+
+## Form consensus
+
+```{r form-consensus, fig.height=6, fig.width=10}
+
+# # bit slow
+system.time(df$consensus_lca <- diceR:::LCA(base_clusterings,
+                                            is.relabelled = FALSE, seed = 100))
+
+system.time(df$consensus_kmodes <- diceR:::k_modes(base_clusterings,
+                                                   is.relabelled = FALSE, seed = 1))
+
+plot_cols <- c("consensus_lca")
+# plot_cols <- c("consensus_kmodes", gt)
+
+ps <- vector("list", length(plot_cols)*length(gt))
+count <- 1
+
+set.seed(1234)
+pal1 <- distinctColorPalette(nclust)
+names(pal1) <- 1:nclust
+gt_cats <- unique(as.character(obs[,gt] %>% as.matrix))
+pal2 <- distinctColorPalette(length(gt_cats))
+names(pal2) <- gt_cats
+palette <- c(pal1, pal2)
+
+for(i in 1:length(plot_cols)) {
+
+  for(j in 1:length(gt)) {
+    
+    psb <- lapply(c(plot_cols[i],gt[j]), function(u) {
+      se <- spot_entropy(coords[,c("row","col")],
+                         df[[u]], k=k)
+      ggplot(df, aes(x=row, y=col, colour=as.factor(.data[[u]]))) +
+        geom_point(size = .5) +
+        theme_classic() +
+        theme(legend.position = "none") +
+        xlab("") + ylab("") +
+        scale_colour_manual(values = palette) +
+        scale_x_continuous(expand = expansion(0,1)) +
+        scale_y_continuous(expand = expansion(0,1)) +
+        ggtitle(paste0(u, " (avg-entropy=",
+                       round(mean(se),4), ")")) +
+        coord_fixed()
+    })
+    
+    sem <- getSpatialExternalMetrics(true = as.factor(obs[[gt[j]]]),
+                                     pred = df[[plot_cols[i]]],
+                                     location = df[,c("row","col")],
+                                     metrics = "spotAgreement",
+                                     level = "element", k = k,
+                                     useNegatives = FALSE)
+    df$spot_agreement <- sem$spotAgreement
+
+    psb[[length(psb)+1]] <- ggplot(df, aes(row, col, colour = spot_agreement)) + 
+      geom_point(size = .5) + 
+      scale_colour_gradient(low="gray90", high="deeppink4") +
+      theme(legend.position = "none") +
+      scale_x_continuous(expand = expansion(0,1)) +
+      scale_y_continuous(expand = expansion(0,1)) +
+      theme_classic() +
+      #theme(legend.position = "none") +
+      xlab("") + ylab("") +
+      coord_fixed() +
+      ggtitle("spotAgreement")
+    
+    psb[[length(psb)+1]] <- ggplot(df, aes(row, col, colour = 1-spot_agreement)) + 
+      geom_point(size = .5) +
+      scale_colour_gradient(low="gray90", high="deeppink4") +
+      theme(legend.position = "none") +
+      scale_x_continuous(expand = expansion(0,1)) +
+      scale_y_continuous(expand = expansion(0,1)) +
+      theme_classic() +
+      theme(legend.position = "none") +
+      xlab("") + ylab("") +
+      coord_fixed() +
+      ggtitle("1-spotAgreement")
+    
+    ps[[count]] <- plot_grid(plotlist = psb, ncol=2)
+    show(ps[[count]])
+    count <- count + 1
+  }
+
+}
+
+
+ggsave(filename = paste0(fn_stub, "_01-consensus.pdf"),
+       plot = marrangeGrob(ps, nrow=1, ncol=1),
+       width = 9, height = 6)
+
+```
+
+## sessionInfo()
+
+```{r sessioninfo}
+sessionInfo()
+```
+

@@ -1,0 +1,427 @@
+---
+title: |
+  Consensus clustering exploration \
+  slice: `r basename(params$datadir)`
+format: 
+    html:
+      toc: true
+      self-contained: true
+      highlight-style: github
+      code-line-numbers: true
+      code-fold: true
+editor: source
+editor_options: 
+  chunk_output_type: console
+params:
+  datadir: 'test'
+  nmethod_range:
+    - 5
+    - 8
+  ground_truth:
+    - x
+    - y
+  nns: 6
+  name: "noname"
+  nclust_range:
+    - 10
+    - 12
+  nsmoothest: 30
+  obs_filter: NULL
+---
+
+## Retrieve parameters
+
+```{r display-params}
+params
+datadir <- params$datadir
+gt <- params$ground_truth
+k <- params$nns
+nclust_range <- params$nclust_range
+nmethod_range <- params$nmethod_range
+name <- params$name
+nsmoothest <- params$nsmoothest
+obs_filter <- params$obs_filter
+
+# # for testing
+datadir <- "data/visium_hd_cancer_colon_square_016um"
+# gt <- c("parcellation_structure","parcellation_substructure")
+k <- 6
+name <- "visium_hd_cancer_colon_016um"
+nclust_range <- c(14,15,16,17,18,19,20)
+nmethod_range <- c(4,5,6,7,8,9)
+nsmoothest <- c(30)
+# obs_filter <- 'parcellation_division=="TH" | parcellation_structure=="ZI"'
+obs_filter <- NULL
+
+```
+
+## Packages / functions
+
+```{r load-packages}
+suppressPackageStartupMessages({
+  library(SpatialExperiment)
+  library(dplyr)
+  library(ggplot2)
+  library(cowplot)
+  library(clue)
+  library(khroma)
+  library(scran)
+  library(limma)
+  library(tibble)
+  library(readr)
+  library(ggrepel)
+  library(mclust)
+  library(pheatmap)
+  library(fastDummies)
+  library(randomcoloR)
+  library(reshape2)
+  library(ClusteringMetrics)
+  library(gridExtra)
+})
+source("utils.R")
+```
+
+
+## Load data
+
+```{r load-data}
+spe <- get_SpatialExperiment(file.path(datadir, "features.tsv"), 
+                             file.path(datadir, "observations.tsv"), 
+                             file.path(datadir, "coordinates.tsv"), 
+                             file.path(datadir, "counts.mtx"))
+
+# not sure this is the best normalization
+spe <- logNormCounts(spe)
+
+if("gene_ids" %in% names(rowData(spe))) {
+  rownames(spe) <- rowData(spe)$gene_ids
+}
+
+if("gene_name" %in% names(rowData(spe))) {
+  rownames(spe) <- rowData(spe)$gene_name
+}
+
+spe$row <- spatialCoords(spe)[,"x"]
+spe$col <- spatialCoords(spe)[,"y"]
+
+spe
+
+suppressMessages(obs <- read_tsv(file.path(datadir, "observations.tsv"),
+                                 show_col_types = FALSE))
+colnames(obs)[1] <- "id"
+
+# somewhat of a hack (for thalamus) to remove unconfident labels
+if(!is.null(obs_filter)) {
+  obs <- obs %>%
+  dplyr::filter(eval(parse(text = obs_filter)))
+}
+
+ap <- apply(obs[,-1], 2, function(u) length(unique(u)))
+ap[gt]
+
+lf <- list.files(datadir, pattern = "combined_domains.tsv$", 
+                 recursive = TRUE, full.names = TRUE)
+names(lf) <- lf
+
+unname(lf)
+
+base_clusterings <- lapply(lf, function(u) {
+  meth <- strsplit(u,"/", fixed = TRUE)[[1]][4:5] %>% 
+    paste0(collapse = "_")
+  # meth <- strsplit(u,"/", fixed = TRUE)[[1]][3:4] %>% 
+  #   paste0(collapse = "_")
+  meth <- gsub("_config","",meth) 
+  suppressMessages(df <- read_tsv(u, show_col_types = FALSE))
+  colnames(df)[1] <- "id"
+  #cols <- grep("n_clusters", colnames(df), value = TRUE)
+  df <- df %>% 
+    #mutate(across(all_of(cols), as.factor)) %>%
+    as.data.frame() #%>% column_to_rownames("id")
+  colnames(df) <- gsub("cluster_", paste0(meth,"_"), 
+                       colnames(df))
+  # colnames(df) <- gsub("n_clusters_", paste0(meth,"_"), 
+  #                      colnames(df))
+  df
+}) #%>% bind_cols 
+
+lapply(base_clusterings, head, 2)
+
+z <- base_clusterings[c(1:3,5:21)] %>% purrr::reduce(full_join, by="id"); head(z, 2); colSums(is.na(z)); dim(z)
+
+m <- match(obs$id, rownames(base_clusterings))
+base_clusterings <- base_clusterings[m,]
+
+spe <- spe[,m]
+
+stopifnot(all(rownames(base_clusterings)==obs$id))
+stopifnot(all(rownames(base_clusterings)==colnames(spe)))
+
+fn_stub <- paste0(name, "_", paste0(nclust_range, collapse = "-"))
+
+```
+
+
+## Smoothness-entropy of base clusterings
+
+```{r smoothness-entropy, fig.width=8, fig.height=6, eval=TRUE}
+
+# find number of actual clusters per column
+real_n <- apply(base_clusterings, 2, 
+                function(u) length(unique(u)))
+
+# focus on clusterings at single number of clusters, loop through
+p <- vector("list", length = length(nclust_range))
+count <- 1
+
+all_mses <- NULL
+
+for(nclust in nclust_range) {
+
+  these_clusterings <- base_clusterings %>%
+    dplyr::select(names(which(real_n==nclust)))
+  
+# base_clusterings <- base_clusterings %>%
+#   dplyr::select(names(which(real_n==nclust))) %>%
+#   align_classes(ref_clustering)
+
+  coords <- colData(spe) %>% as.data.frame %>%
+    rownames_to_column("id") %>% 
+    dplyr::select(id, row, col)
+  
+  df <- these_clusterings %>%
+    rownames_to_column("id") %>%
+    left_join(coords, by = "id")
+  
+  palette <- distinctColorPalette(nclust)
+  names(palette) <- 1:nclust
+  
+  mse <- apply(these_clusterings, 2,
+               function(u) spot_entropy(coords[,c("row","col")], 
+                                        u, k=k))
+  cm <- mse %>% colMeans
+  lv <- cm %>% sort %>% names
+  print(cm)
+  
+  all_mses <- append(all_mses, cm)
+  
+  mse_m <- melt(mse, value.name = "entropy")
+  mse_m$Var2 <- factor(mse_m$Var2, levels=lv)
+  
+  mse_p <- ggplot(mse_m, aes(Var2, entropy)) + 
+    geom_violin() +
+    ylab(paste0("pointwise entropy (k=", k, ")")) +
+    xlab("base clustering") +
+    theme_classic() +
+    theme(axis.text.x = element_text(angle = 45,
+                                     vjust = 1, hjust=1)) +
+    geom_label(data = data.frame(Var2=names(cm), 
+                                 entropy = cm, label=round(cm,4)),
+               mapping = aes(x=Var2,y=entropy,label=label), size = 2.5) +
+    scale_y_sqrt() +
+    ggtitle(paste0("Smoothness-entropy (", nclust, " clusters)"))
+  
+  show(mse_p)
+  p[[count]] <- mse_p
+  count <- count+1
+
+}
+
+ggsave(filename = paste0(fn_stub, "_01_smoothness-entropy.pdf"),
+       plot = marrangeGrob(p, nrow=1, ncol=1),
+       width = 8, height = 6)
+
+```
+
+## Across-clusterings-entropy for selected clusterings
+
+```{r across-clusterings-entropy, fig.width=10, fig.height=5.5}
+
+q <- vector("list", length = length(nclust_range))
+count <- 1
+
+cents <- matrix(0, nrow=length(nmethod_range),
+                ncol = length(nclust_range),
+                dimnames = list(nmethod_range, nclust_range))
+
+for(nmethod in nmethod_range) {
+  for(nclust in nclust_range) {
+    
+    # use "smoothest" as reference
+    these_mses <- all_mses[names(which(real_n==nclust))] %>% sort
+    ref_clustering <- names(which.min(these_mses))
+    
+    these_clusterings <- base_clusterings %>%
+      dplyr::select(names(which(real_n==nclust))) %>%
+      align_classes(ref_clustering)
+    
+    keepers <- head(these_mses, nmethod) %>% names
+    
+    lv <- levels(these_clusterings[[ref_clustering]])
+    ps <- apply(these_clusterings[,keepers], 1,
+                function(u) table(factor(u,levels = lv))) %>% t
+    
+    df$ent <- apply(ps, 1, calc_entropy)
+    
+    cents[as.character(nmethod), as.character(nclust)] <- mean(df$ent)
+    
+    ace_q <- ggplot(df, aes(row,col,colour=ent)) +
+      geom_point(size = 1) +
+      scale_colour_gradient(low="gray90", high="deeppink4") +
+      theme_classic() +
+      theme(legend.position = "bottom") +
+      scale_x_continuous(expand = expansion(0,1)) +
+      scale_y_continuous(expand = expansion(0,1)) +
+      coord_fixed() +
+      labs(title = paste0("Across-clusterings-entropy (", 
+                          nclust, " clusters, ",
+                          nmethod, " methods)"),
+           subtitle = paste0(strwrap(paste0(keepers, 
+                                            collapse = " "), width=100),
+                             collapse="\n")) +
+      theme(plot.subtitle=element_text(size=8))
+    show(ace_q)
+    q[[count]] <- ace_q
+    count <- count + 1
+    
+  }
+
+}
+
+ggsave(filename = paste0(fn_stub, "_02-across-clusterings-entropy.pdf"),
+       plot = marrangeGrob(q, nrow=1, ncol=1),
+       width = 8, height = 6)
+
+pheatmap(cents, cluster_rows = FALSE, 
+         cluster_cols = FALSE, 
+         color = colorRampPalette(c("gray90","deeppink4"))(30))
+
+```
+
+
+## Base clusterings with spatial metrics
+
+```{r base-clusterings-viz, fig.width=10, fig.height=10, eval=TRUE}
+
+bases <- all_mses %>% sort %>% head(nsmoothest)
+bcs <- vector("list", length(bases)*length(gt))
+count <- 1
+
+for(i in 1:length(bases)) {
+  
+  nm <- names(bases)[i]
+  nclust <- real_n[nm]
+  
+  palette <- distinctColorPalette(nclust)
+  names(palette) <- 1:nclust
+  
+  df$this_base <- as.factor(base_clusterings[[nm]])
+
+  aa <- ggplot(df, aes(x=row, y=col, colour=this_base)) + 
+    geom_point(size = .5) +
+    theme_classic() +
+    theme(legend.position = "none") +
+    xlab("") + ylab("") +
+    scale_colour_manual(values = palette) +
+    scale_x_continuous(expand = expansion(0,1)) +
+    scale_y_continuous(expand = expansion(0,1)) +
+    ggtitle(nm) + coord_fixed()
+  
+  for(j in 1:length(gt)) {
+    
+    sem <- getSpatialExternalMetrics(true = as.factor(obs[[gt[j]]]),
+                                     pred = base_clusterings[[nm]], 
+                                     location = df[,c("row","col")],
+                                     metrics = "spotAgreement",
+                                     level = "element", k = k,
+                                     useNegatives = FALSE)
+    df$spot_agreement <- sem$spotAgreement
+
+    bb <- ggplot(df, aes(row, col, colour = spot_agreement)) + 
+      geom_point(size = .5) + 
+      scale_colour_gradient(low="gray90", high="deeppink4") +
+      theme(legend.position = "none") +
+      scale_x_continuous(expand = expansion(0,1)) +
+      scale_y_continuous(expand = expansion(0,1)) +
+      theme_classic() +
+      theme(legend.position = "none") +
+      xlab("") + ylab("") +
+      coord_fixed() +
+      ggtitle("spotAgreement")
+    
+    cc <- ggplot(df, aes(row, col, colour = 1-spot_agreement)) + 
+      geom_point(size = .5) +
+      scale_colour_gradient(low="gray90", high="deeppink4") +
+      theme(legend.position = "none") +
+      scale_x_continuous(expand = expansion(0,1)) +
+      scale_y_continuous(expand = expansion(0,1)) +
+      theme_classic() +
+      theme(legend.position = "none") +
+      xlab("") + ylab("") +
+      coord_fixed() +
+      ggtitle("1-spotAgreement")
+    
+    df$ground_truth <- as.factor(obs[[gt[j]]])
+    ngt <- length(unique(df$ground_truth))
+    set.seed(1234)
+    palette <- distinctColorPalette(ngt)
+    names(palette) <- levels(df$gt)
+    
+    dd <- ggplot(df, aes(x=row, y=col, colour=ground_truth)) + 
+      geom_point(size = .5) +
+      theme_classic() +
+      theme(legend.position = "none") +
+      xlab("") + ylab("") +
+      scale_colour_manual(values = palette) +
+      scale_x_continuous(expand = expansion(0,1)) +
+      scale_y_continuous(expand = expansion(0,1)) +
+      ggtitle(gt[j]) + coord_fixed()
+    
+    bcs[[count]] <- plot_grid(aa,dd,bb,cc, nrow=2, ncol=2)
+    show(bcs[[count]])
+    count <- count+1
+
+  }
+
+}
+
+ggsave(filename = paste0(fn_stub, "_03-base-clusterings.pdf"),
+       plot = marrangeGrob(bcs, nrow=1, ncol=1),
+       width = 9, height = 6)
+
+```
+
+
+## Similarity: "smoothest" clusterings
+
+```{r smoothest-clusterings, fig.height=7, fig.width=8}
+keepers <- names(bases)
+aris_sel <- calc_aris(cbind(base_clusterings[,keepers],
+                            obs[,gt]))
+# aris_sel <- calc_aris(base_clusterings[,keepers])
+ph_sel <- pheatmap(aris_sel, fontsize = 10)
+save_pheatmap_pdf(ph_sel, paste0(fn_stub, "_04-heatmap-selected.pdf"), width = 8)
+```
+
+
+## Assemble artifacts, write to file
+
+```{r assemble-dataframe}
+
+out_df <- cbind(coords, base_clusterings[,names(all_mses)], 
+                obs[,gt])
+
+saveRDS(out_df, 
+        file.path(datadir, paste0("df_", name, ".rds")))
+saveRDS(all_mses, 
+        file.path(datadir, paste0("spot-entropies_", name, ".rds")))
+
+
+```
+
+
+## sessionInfo()
+
+```{r sessioninfo}
+sessionInfo()
+```
+
