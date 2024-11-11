@@ -235,7 +235,7 @@ for(nclust in nclust_range) {
     scale_y_sqrt() +
     ggtitle(paste0("Smoothness-entropy (", nclust, " clusters)"))
   
-  show(mse_p)
+  # show(mse_p)
   p[[count]] <- mse_p
   count <- count+1
 
@@ -245,7 +245,31 @@ ggsave(filename = paste0(fn_stub, "_01_smoothness-entropy.pdf"),
        plot = marrangeGrob(p, nrow=1, ncol=1),
        width = 8, height = 6)
 
+all_mses
+
 ```
+
+
+## Similarity of all clusterings
+
+```{r clustering-similarities, fig.height=9, fig.width=10}
+# keepers <- names(bases)
+aris_all <- calc_aris(cbind(base_clusterings,obs[,gt]))
+ph_all <- pheatmap(aris_all, fontsize = 8)
+show(ph_all)
+save_pheatmap_pdf(ph_all, paste0(fn_stub, "_02_heatmap-all.pdf"), width = 12, height=11)
+
+bases <- all_mses %>% sort %>% head(nsmoothest)
+keepers <- names(bases)
+aris_sel <- calc_aris(cbind(base_clusterings[,keepers],obs[,gt]))
+ph_sel <- pheatmap(aris_sel, fontsize = 10)
+show(ph_sel)
+save_pheatmap_pdf(ph_sel, paste0(fn_stub, "_02_heatmap-", 
+                                 nsmoothest, "smoothest.pdf"), 
+                  width = 8, height=7.5)
+
+```
+
 
 ## Across-clusterings-entropy for selected clusterings
 
@@ -302,7 +326,7 @@ for(nmethod in nmethod_range) {
 
 }
 
-ggsave(filename = paste0(fn_stub, "_02-across-clusterings-entropy.pdf"),
+ggsave(filename = paste0(fn_stub, "_03_across-clusterings-entropy.pdf"),
        plot = marrangeGrob(q, nrow=1, ncol=1),
        width = 8, height = 6)
 
@@ -399,22 +423,10 @@ for(i in 1:length(bases)) {
 
 }
 
-ggsave(filename = paste0(fn_stub, "_03-base-clusterings.pdf"),
+ggsave(filename = paste0(fn_stub, "_04_base-clusterings.pdf"),
        plot = marrangeGrob(bcs, nrow=1, ncol=1),
-       width = 9, height = 6)
+       width = 9, height = 5)
 
-```
-
-
-## Similarity: "smoothest" clusterings
-
-```{r smoothest-clusterings, fig.height=7, fig.width=8}
-keepers <- names(bases)
-aris_sel <- calc_aris(cbind(base_clusterings[,keepers],
-                            obs[,gt]))
-# aris_sel <- calc_aris(base_clusterings[,keepers])
-ph_sel <- pheatmap(aris_sel, fontsize = 10)
-save_pheatmap_pdf(ph_sel, paste0(fn_stub, "_04-heatmap-selected.pdf"), width = 8)
 ```
 
 
