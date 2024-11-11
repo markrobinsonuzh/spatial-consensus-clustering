@@ -43,15 +43,20 @@ nsmoothest <- params$nsmoothest
 obs_filter <- params$obs_filter
 
 # # for testing
-datadir <- "data/visium_hd_cancer_colon_square_016um"
+# datadir <- "data/visium_hd_cancer_colon_square_016um"
+# name <- "visium_hd_cancer_colon_016um"
+# name <- "thalamus-6400"
+# datadir <- "data/abc_atlas_wmb_thalamus/C57BL6J-638850_6400"
 # gt <- c("parcellation_structure","parcellation_substructure")
-k <- 6
-name <- "visium_hd_cancer_colon_016um"
-nclust_range <- c(14,15,16,17,18,19,20)
-nmethod_range <- c(4,5,6,7,8,9)
-nsmoothest <- c(30)
+# k <- 6
+# nclust_range <- c(16,20,24)
+# nmethod_range <- c(3,4,5,6,7,8,9)
+# nsmoothest <- c(30)
 # obs_filter <- 'parcellation_division=="TH" | parcellation_structure=="ZI"'
-obs_filter <- NULL
+
+# if datadir ends in `/`, it screws up the parsing of method names,
+# so add a check for it
+stopifnot(tail(strsplit(datadir,"")[[1]],1)!="/")
 
 ```
 
@@ -110,10 +115,13 @@ suppressMessages(obs <- read_tsv(file.path(datadir, "observations.tsv"),
                                  show_col_types = FALSE))
 colnames(obs)[1] <- "id"
 
-# somewhat of a hack (for thalamus) to remove unconfident labels
+# check that SpatialExperiment and GT are aligned
+stopifnot(colnames(spe)==obs$id)
+
+# remove unconfident labels (if any)
 if(!is.null(obs_filter)) {
   obs <- obs %>%
-  dplyr::filter(eval(parse(text = obs_filter)))
+    dplyr::filter(eval(parse(text = obs_filter)))
 }
 
 ap <- apply(obs[,-1], 2, function(u) length(unique(u)))
@@ -125,36 +133,42 @@ names(lf) <- lf
 
 unname(lf)
 
+len <- strsplit(datadir, "/")[[1]] %>% length
+inds <- len+c(1:2)
+
 base_clusterings <- lapply(lf, function(u) {
-  meth <- strsplit(u,"/", fixed = TRUE)[[1]][4:5] %>% 
+  meth <- strsplit(u,"/", fixed = TRUE)[[1]][inds] %>%
     paste0(collapse = "_")
-  # meth <- strsplit(u,"/", fixed = TRUE)[[1]][3:4] %>% 
-  #   paste0(collapse = "_")
   meth <- gsub("_config","",meth) 
   suppressMessages(df <- read_tsv(u, show_col_types = FALSE))
   colnames(df)[1] <- "id"
-  #cols <- grep("n_clusters", colnames(df), value = TRUE)
-  df <- df %>% 
-    #mutate(across(all_of(cols), as.factor)) %>%
-    as.data.frame() #%>% column_to_rownames("id")
+  if( all(sapply(sapply(df$id, strsplit, ""), .subset, 1)=="x") ) {
+    # hack for spatialGE -- if all ids begin with x, remove it
+    df$id <- substr(df$id, 2, nchar(df$id))
+  }
+  df <- df %>% as.data.frame()
   colnames(df) <- gsub("cluster_", paste0(meth,"_"), 
                        colnames(df))
-  # colnames(df) <- gsub("n_clusters_", paste0(meth,"_"), 
-  #                      colnames(df))
   df
-}) #%>% bind_cols 
+})
 
+# quick scan
 lapply(base_clusterings, head, 2)
 
-z <- base_clusterings[c(1:3,5:21)] %>% purrr::reduce(full_join, by="id"); head(z, 2); colSums(is.na(z)); dim(z)
+base_clusterings <- base_clusterings %>% 
+  purrr::reduce(full_join, by="id")
 
-m <- match(obs$id, rownames(base_clusterings))
+cms <- colMeans(is.na(base_clusterings))
+base_clusterings <- base_clusterings[,cms<.4]
+
+m <- match(obs$id, base_clusterings$id)
 base_clusterings <- base_clusterings[m,]
 
+m <- match(obs$id, colnames(spe))
 spe <- spe[,m]
 
-stopifnot(all(rownames(base_clusterings)==obs$id))
-stopifnot(all(rownames(base_clusterings)==colnames(spe)))
+stopifnot(all(base_clusterings$id==obs$id))
+stopifnot(all(base_clusterings$id==colnames(spe)))
 
 fn_stub <- paste0(name, "_", paste0(nclust_range, collapse = "-"))
 
@@ -164,6 +178,11 @@ fn_stub <- paste0(name, "_", paste0(nclust_range, collapse = "-"))
 ## Smoothness-entropy of base clusterings
 
 ```{r smoothness-entropy, fig.width=8, fig.height=6, eval=TRUE}
+
+rownames(base_clusterings) <- NULL
+base_clusterings <- base_clusterings %>%
+  as.data.frame %>%
+  column_to_rownames("id")
 
 # find number of actual clusters per column
 real_n <- apply(base_clusterings, 2, 
@@ -180,10 +199,6 @@ for(nclust in nclust_range) {
   these_clusterings <- base_clusterings %>%
     dplyr::select(names(which(real_n==nclust)))
   
-# base_clusterings <- base_clusterings %>%
-#   dplyr::select(names(which(real_n==nclust))) %>%
-#   align_classes(ref_clustering)
-
   coords <- colData(spe) %>% as.data.frame %>%
     rownames_to_column("id") %>% 
     dplyr::select(id, row, col)
