@@ -120,8 +120,7 @@ for(j in 1:ncol(m)) {
     tc <-   tryCatch(
         #try to do this
         { LCA(base_clusterings[,meths],is.relabelled = FALSE, seed = 100)},
-        error=function(e) { message('Error. Skipping.')   #print(e)  
-          },
+        error=function(e) { message('Error. Skipping.')   #print(e)  },
         warning=function(w) { message('A Warning Occurred'); print(w); return(NA) }
     )
     
@@ -248,6 +247,11 @@ for(i in 1:length(plot_cols)) {
 ggsave(filename = paste0(fn_stub, "_01-consensus.pdf"),
        plot = marrangeGrob(ps, nrow=1, ncol=1),
        width = 9, height = 6)
+
+```
+
+```{r form consensus via iteration methods, fig.height=6, fig.width=10}
+
 
 ```
 

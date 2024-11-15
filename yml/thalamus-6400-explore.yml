@@ -1,5 +1,5 @@
 name: thalamus-6400
-datadir: data/abc_atlas_wmb_thalamus/C57BL6J-638850_6400
+datadir: ../../data/abc_atlas_wmb_thalamus/C57BL6J-638850_6400
 nclust_range: 
   - 16
   - 20
