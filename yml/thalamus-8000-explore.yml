@@ -1,4 +1,4 @@
-name: thalamus-7200
+name: thalamus-8000
 datadir: ../../data/abc_atlas_wmb_thalamus/C57BL6J-638850_8000
 nclust_range: 
   - 16
