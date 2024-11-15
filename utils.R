@@ -103,10 +103,14 @@ get_SpatialExperiment <- function(
     reducedDim_file = NA,
     assay_name = "counts",
     reducedDim_name = "reducedDim") {
-  rowData <- read.delim(feature_file, stringsAsFactors = FALSE, row.names = 1)
-  colData <- read.delim(observation_file, stringsAsFactors = FALSE, row.names = 1)
+  # Make sure row name columns are treated as characters 
+  rowData <- read.delim(feature_file, stringsAsFactors = FALSE, row.names = 1, 
+                        colClasses = c("character", rep(NA, ncol(read.delim(feature_file, header=TRUE))-1)))
+  colData <- read.delim(observation_file, stringsAsFactors = FALSE, row.names = 1,
+                        colClasses = c("character", rep(NA, ncol(read.delim(observation_file, header=TRUE))-1)))
   
-  coordinates <- read.delim(coord_file, sep = "\t", row.names = 1)
+  coordinates <- read.delim(coord_file, sep = "\t", row.names = 1,
+                            colClasses = c("character", rep(NA, ncol(read.delim(coord_file, header=TRUE))-1)))
   coordinates <- as.matrix(coordinates[rownames(colData), ])
   coordinates[,c(1:2)] <- as.numeric(coordinates[,c(1:2)])
   
@@ -157,3 +161,95 @@ plotter_fun <- function(u,v,z, point_size = 3) {
 }
 
 
+## Adopted from https://github.com/keyalone/EnSDD/blob/main/R/utils.R, modified for JSD instead of L2 norm
+
+
+########### ensemble strategy ###############
+#' The adaptive weighted ensemble-based learning method to integrate the multiple binary spots similarity matrix
+#'
+#'
+#' @importFrom parallel makeCluster stopCluster parApply
+#' @importFrom abind abind
+#'
+#' @TODO: Make Reuslts.clustering a sparse matrix object. Does it need to change anything?
+#' @param Results.clustering a list contains all the results of individual similarity matrix. The elements of list is a matrix, spots * spots.
+#' @param lambda hyper-parameter constrain the weight of individual methods for ensemble. If the parameter is set to NULL, then, we will adopt the value in our algorithm.
+#' @param prob.quantile numeric of probabilities with values in [0,1]. Default setting is 0.5.
+#' @param niter a positive integer represents the maximum number of updating algorithm. Default setting is 100.
+#' @param epsilon a parameter represents the stop criterion.
+#'
+#' @return a list contains a matrix of the ensemble similarity of spots and a vector of the weight assigned to base results.
+#'
+#'@export
+
+solve_ensemble <- function(Results.clustering, 
+                          lambda = NULL, 
+                          prob.quantile = 0.5,
+                          niter = 100, 
+                          epsilon = 1e-5,
+                          verbose = FALSE){
+  options(digits = 7)
+  # Results.clustering <- Results.clustering.all[[1]]
+  num.methods <- length(Results.clustering)
+  num.spots <- nrow(Results.clustering[[1]])
+  num.cell.type <- ncol(Results.clustering[[1]])
+
+  ## initialization V by the mean of individual values
+  w <- c(rep(1/num.methods, num.methods))
+  H <-  Reduce("+", Map("*", Results.clustering, w))
+
+  if(is.null(lambda)){
+    cat("We will adpote a value for lambda in our algorithm...", "\n")
+  }
+
+  k <- 1
+
+  while (k <= niter) {
+    if(k == 1){
+      loss_all_temp <- 0
+      # Generate the first loss value 
+      temp2 <-  sapply(Results.clustering, L2_norm, Y = H)
+      # Empricial estimation of lambda in the paper
+      if(is.null(lambda)){
+        lambda <- quantile(temp2, probs = prob.quantile)
+      }
+    }else{
+      loss_all_temp <- loss_all
+    }
+    ##### update w
+    temp2 <-  sapply(Results.clustering, L2_norm, Y = H)
+    w <- exp(-temp2/lambda)/sum(exp(-temp2/lambda))
+    ##### update H
+    H <-  Reduce("+", Map("*", Results.clustering, w))
+
+    # Objective function loss
+    loss_main <- sum(sapply(Results.clustering, L2_norm, Y = H) * w)
+    loss_entropy <- sum(w * log(w))
+    loss_all <- loss_main + lambda * loss_entropy
+
+    if(k == niter){
+      cat("The method maybe not convergens, the algorithm need an larger max_epoches!", "\n")}
+
+    # Stopping criteria
+    diff_iter <- abs(loss_all - loss_all_temp)
+    if (verbose){
+      cat("iter: ", k, "loss_main: ", loss_main, "loss_entropy: ", loss_entropy,
+          "loss_all: ", loss_all, "lambda: ", lambda, "diff",
+          diff_iter, "\n")
+    }
+
+    if(diff_iter < epsilon | k >= niter){
+      break
+      }
+    k <- k + 1
+
+  }
+  colnames(H) <- colnames(Results.clustering[[1]])
+  return(list(H = H, w = w))
+
+}
+
+L2_norm <- function(X, Y){
+  return(sqrt(sum((X-Y)^2)))
+}
+########### ensemble strategy ###########

@@ -1,0 +1,26 @@
+name: libd_dlpfc-Br5292_151507
+datadir: ../../data/visium_hd_cancer_colon/visium_hd_cancer_colon_square_016um
+nclust_range: 
+  - 5
+  - 6
+  - 7
+  - 9
+  - 11
+  - 14
+nmethod_range:
+#  - 3
+#  - 4
+#  - 5
+#  - 6
+  - 7
+  - 8
+  - 9
+  - 10
+  - 11
+  - 12
+  - 13
+ground_truth:
+  - label
+nns: 6
+nsmoothest: 30
+# obs_filter: parcellation_division=="TH" | parcellation_structure=="ZI"
