@@ -27,6 +27,7 @@ params:
     - 12
   nsmoothest: 30
   obs_filter: NULL
+  spot_agreement: NULL
 # output-dir: "output"
 ---
 
@@ -42,6 +43,7 @@ nmethod_range <- params$nmethod_range
 name <- params$name
 nsmoothest <- params$nsmoothest
 obs_filter <- params$obs_filter
+spot_agreement <- params$spot_agreement
 
 # # for testing
 # datadir <- "data/visium_hd_cancer_colon_square_016um"
@@ -67,6 +69,7 @@ stopifnot(tail(strsplit(datadir,"")[[1]],1)!="/")
 suppressPackageStartupMessages({
   library(SpatialExperiment)
   library(dplyr)
+  library(tidyr)
   library(ggplot2)
   library(cowplot)
   library(clue)
@@ -161,14 +164,36 @@ base_clusterings <- lapply(lf, function(u) {
   meth <- strsplit(u,"/", fixed = TRUE)[[1]][inds] %>%
     paste0(collapse = "_")
   meth <- gsub("_config","",meth) 
-  suppressMessages(df <- read_tsv(u, col_types=paste0("c", rep("?", ncol(read_tsv(u))-1)),
+  suppressMessages(df <- read_tsv(u, col_types=paste0("c", rep("?", ncol(read_tsv(u))-1))
 ))
   colnames(df)[1] <- "id"
   if( all(sapply(sapply(df$id, strsplit, ""), .subset, 1)=="x") ) {
     # hack for spatialGE -- if all ids begin with x, remove it
     df$id <- substr(df$id, 2, nchar(df$id))
   }
-  df <- df %>% as.data.frame()
+  # for SOTIP -- remove clusters labels with one domainant class (will affect the spot entropy)
+  # Currently set the class imblance threshold to 90% @TODO DISCUSS WITH MARK IF IT MAKES SENSE
+  df <- df %>% 
+        select(where(~ max(table(.)) / length(.) <= 0.9)) %>%
+        mutate(across(2:ncol(.), ~{
+          # for SOTIP -- if labels are not continuous assign them to 1-to-n based on cluser size
+          cc <- . 
+          unique_labels <- sort(unique(cc))
+
+          # sanity check: if cluster matches sequential ascending order
+          if (all(unique_labels==seq_along(unique_labels))) {
+            return(as.factor(cc))
+          } else {
+            # Reorder and label the cluster based on the size
+            sorted_cc <- table(cc) %>% sort(decreasing = TRUE) %>% names()
+            lab_dict <- seq_along(sorted_cc) %>% setNames(sorted_cc)
+            new_cc <- lab_dict[as.character(cc)] %>% as.factor()
+
+            return(new_cc)
+          }
+        })) %>% 
+        as.data.frame()
+
   colnames(df) <- gsub("cluster_", paste0(meth,"_"), 
                        colnames(df))
   df
@@ -176,6 +201,9 @@ base_clusterings <- lapply(lf, function(u) {
 
 # quick scan
 lapply(base_clusterings, head, 2)
+
+# Remove extreme cluster-imbalanced case as it mess up later metric processing
+base_clusterings <- 
 
 base_clusterings <- base_clusterings %>% 
   purrr::reduce(full_join, by="id")
@@ -389,7 +417,8 @@ for(i in 1:length(bases)) {
     ggtitle(nm) + coord_fixed()
   
   for(j in 1:length(gt)) {
-    
+    if (spot_agreement==TRUE){
+
     sem <- getSpatialExternalMetrics(true = as.factor(obs[[gt[j]]]),
                                      pred = base_clusterings[[nm]], 
                                      location = df[,c("row","col")],
@@ -421,12 +450,13 @@ for(i in 1:length(bases)) {
       xlab("") + ylab("") +
       coord_fixed() +
       ggtitle("1-spotAgreement")
+    }
     
     df$ground_truth <- as.factor(obs[[gt[j]]])
     ngt <- length(unique(df$ground_truth))
     set.seed(1234)
     palette <- distinctColorPalette(ngt)
-    names(palette) <- levels(df$gt)
+    names(palette) <- levels(df$ground_truth)
     
     dd <- ggplot(df, aes(x=row, y=col, colour=ground_truth)) + 
       geom_point(size = .5) +
@@ -438,7 +468,9 @@ for(i in 1:length(bases)) {
       scale_y_continuous(expand = expansion(0,1)) +
       ggtitle(gt[j]) + coord_fixed()
     
-    bcs[[count]] <- plot_grid(aa,dd,bb,cc, nrow=2, ncol=2)
+    plot_list <- list(aa, dd)
+    if (spot_agreement){plot_list <- c(plot_list, list(bb, cc))}
+    bcs[[count]] <- plot_grid(plotlist=plot_list, ncol=2, nrow=length(plot_list)/2)
     show(bcs[[count]])
     count <- count+1
 
@@ -446,9 +478,11 @@ for(i in 1:length(bases)) {
 
 }
 
+h_val = ifelse(spot_agreement, 5, 3)
+
 ggsave(filename = paste0(fn_stub, "_04_base-clusterings.pdf"),
-       plot = marrangeGrob(bcs, nrow=1, ncol=1),
-       width = 9, height = 5)
+       plot = marrangeGrob(bcs, ncol=1, nrow=1),
+       width = 9, height = h_val)
 
 ```
 
