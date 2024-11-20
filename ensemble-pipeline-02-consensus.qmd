@@ -48,7 +48,7 @@ k <- params$nns
 
 ## Packages / functions
 
-```{r load-packages}
+```{r load-packages, eval=TRUE}
 suppressPackageStartupMessages({
   library(dplyr)
   library(ggplot2)
@@ -74,9 +74,13 @@ source("utils.R")
 
 ## Load data
 
-```{r load-data}
+```{r load-data, eval=TRUE}
 df <- readRDS(file.path(datadir, paste0("df_", name, ".rds")))
 mses <- readRDS(file.path(datadir, paste0("spot-entropies_", name, ".rds")))
+
+# Modify the "-" in SCAN-IT, will lead to later issue
+colnames(df) <- gsub("-", "", colnames(df))
+names(mses) <- gsub("-", "", names(mses))
 
 # organize a few data frames from previous outputs
 coords <- df[,c("row","col")]
@@ -92,7 +96,7 @@ fn_stub <- paste0(name, "_nclust-", nclust, "_nmeth-", nmethod)
 # base_clusterings <- base_clusterings+1
 ```
 
-```{r test runtime and smoothness for LCA consensus results, fig.width=8, fig.height=6}
+```{r test runtime and smoothness for LCA consensus results, fig.width=8, fig.height=6, eval=FALSE}
 # @TODO: Parameterize sw and m size for different ensemble cluster numbers
 # Threshold for smoothness
 keep <- mses[mses < .18]
@@ -169,9 +173,11 @@ pheatmap(tm, cluster_rows = FALSE,
 real_n <- apply(base_clusterings, 2, 
                 function(u) length(unique(u)))
 real_n <- real_n[which(real_n == nclust)]
+#'@QUESTION: Should we filter out non-spatial method? 
+real_n <- real_n[!startsWith(names(real_n), "seurat") & !startsWith(names(real_n), "scanpy") & !startsWith(names(real_n), "SOTIP")]
 
 # sort the cluster based on the smooth-ness level and only take the smoothest n methods
-meths <- mses[names(real_n)] %>% sort %>% head(nmethod)
+meths <- mses[names(real_n)] %>% sort %>% head(min(nmethod, length(real_n)))
 
 base_clusterings <- base_clusterings %>%
   dplyr::select(names(meths)) %>%
@@ -183,23 +189,25 @@ dim(base_clusterings)
 
 ## Form consensus
 
-```{r form-consensus, fig.height=6, fig.width=10}
+```{r form-consensus, fig.height=6, fig.width=10, eval=TRUE}
 
 # # bit slow
+cat("LCA: \n")
 system.time(df$consensus_lca <- diceR:::LCA(base_clusterings,
                                             is.relabelled = FALSE, seed = 100))
 
+cat("K-modes: \n")
 system.time(df$consensus_kmodes <- diceR:::k_modes(base_clusterings,
                                                    is.relabelled = FALSE, seed = 1))
 
 ```
 
-```{r form consensus via iteration methods}
+```{r form consensus via iteration methods, eval=TRUE}
 # igraph, Matrix packages required
 # Taking all spatial clusters with the targeted number of clusters
 
 # selected_clusters <- df[,names(mses)] %>% 
-#                      dplyr::select(names(real_n), !starts_with(c("seurat", "scanpy")))
+#                      dplyr::select(names(real_n), !starts_with("seurat"), !starts_with("scanpy"))))
 selected_clusters <- base_clusterings
 
 
@@ -209,23 +217,23 @@ binary_matrices <- lapply(selected_clusters, get_binary_matrix)
 # Get consensus clustering from KL EnSDD method
 st <- proc.time()
 ensemble_result <- solve_ensemble(Results.clustering = binary_matrices, verbose=TRUE)
-delta_ensemble <- proc.time() - st
-print(delta_ensemble)
 
 # Resulting binary matrix
 binary_ensemble <- ensemble_result$H
 weight_vector <- ensemble_result$w
 
-colnames(binary_ensemble) <- rownames(selected_clusters)
 # Ensemble labelling
-ensemble_label <- get_cluster_label(binary_ensemble, n_clust_target=nclust, verbose=T)
+ensemble_label <- get_cluster_label(binary_ensemble, n_clust_target=nclust, verbose=FALSE)
+delta_ensemble <- proc.time() - st
+
+cat("Weighted Ensemble: \n", delta_ensemble)
 
 # Save ensemble results
-df$consensus_KLWEN <- ensemble_label
+df$consensus_weighted <- ensemble_label
 ```
 
-```{r visualization consensus results, fig.height=6, fig.width=10}
-plot_cols <- c("consensus_lca", "consensus_KLWEN", "consensus_kmodes", gt)
+```{r visualization consensus results, fig.height=6, fig.width=10, eval=TRUE}
+plot_cols <- c("consensus_lca", "consensus_weighted", "consensus_kmodes")
 # plot_cols <- c("consensus_kmodes", gt)
 
 ps <- vector("list", length(plot_cols)*length(gt))
@@ -277,7 +285,7 @@ for(i in 1:length(plot_cols)) {
       #theme(legend.position = "none") +
       xlab("") + ylab("") +
       coord_fixed() +
-      ggtitle("SpatialSPC")
+      ggtitle("spotAgreement")
     
     psb[[length(psb)+1]] <- ggplot(df, aes(row, col, colour = 1-spot_agreement)) + 
       geom_point(size = .5) +
@@ -305,7 +313,8 @@ ggsave(filename = paste0(fn_stub, "_01-consensus.pdf"),
 
 ```
 
-```{r plot weight results, fig.height=6, fig.width=10}
+```{r plot weight results, fig.height=6, fig.width=10, eval=TRUE}
+weight_vector <- weight_vector %>% sort(decreasing=TRUE)
 weight_df <- weight_vector %>% 
             sort() %>% 
             as.data.frame() %>% 
@@ -323,7 +332,7 @@ weight_bar <- ggplot(weight_df, aes(x=instance, y=weights)) +
               ylab("Weight")
 
 # Align the class with the most relied-on cluster
-aligned_bases <- align_classes(df, ref = "consensus_KLWEN", 
+aligned_bases <- align_classes(df, ref = "consensus_weighted", 
                   columns=names(weight_vector)) 
 
 # Generate the palette on the largest possible number of categories
@@ -331,7 +340,7 @@ gt_lengths <- apply(aligned_bases[ ,gt], 2, function(x) length(unique(x)))
 palette <- distinctColorPalette(max(c(nclust, gt_lengths)))
 
 # Generate the list of base-cluster plots
-plot_list <- lapply(c("consensus_KLWEN", names(weight_vector), gt), function(label){
+plot_list <- lapply(c("consensus_weighted", names(weight_vector), gt), function(label){
 
   cl <- unique(aligned_bases[[label]])
   this_palette <- palette[1:length(cl)] %>% setNames(cl)
@@ -368,9 +377,9 @@ ggsave(filename = paste0(fn_stub, "_03_KLWEB-base-clusterings.pdf"),
        width = 14, height = 8)
 ```
 
-```{r save results}
-write.csv(df, file.path(datadir, paste0("df_consensus_", name, ".tsv")), sep="\t")
-write.csv(weight_df, file.path(datadir, paste0("weights_consensus_", name, ".tsv")), sep="\t")
+```{r save results, eval=TRUE}
+write.table(df, file.path(datadir, paste0("df_consensus_", name, ".tsv")), sep="\t")
+write.table(weight_df, file.path(datadir, paste0("weights_consensus_", name, ".tsv")), sep="\t")
 ```
 
 ## sessionInfo()
