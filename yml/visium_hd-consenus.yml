@@ -1,0 +1,7 @@
+name: visium_hd
+datadir: ../../data/visium_hd_cancer_colon/visium_hd_cancer_colon_square_016um
+nclust: 11
+nmethod: 6
+ground_truth:
+  - label
+nns: 6

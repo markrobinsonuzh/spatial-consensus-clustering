@@ -1,0 +1,8 @@
+name: thalamus-8000
+datadir: ../../data/abc_atlas_wmb_thalamus/C57BL6J-638850_8000
+nclust: 20
+nmethod: 6
+ground_truth:
+  - parcellation_structure
+  - parcellation_substructure
+nns: 6
