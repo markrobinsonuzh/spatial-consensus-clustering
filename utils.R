@@ -55,10 +55,17 @@ save_pheatmap_pdf <- function(x, filename, width=7, height=7) {
   dev.off()
 }
 
-
-align_classes <- function(d, ref) {
+# Add an option here to allow alignment of only part of the columns 
+align_classes <- function(d, ref, columns=NULL) {
   
   bcs <- d %>% as.data.frame
+
+  # Adding a columns filtering here
+  if (!is.null(columns)){
+    all_cols <- colnames(bcs)
+    bcs <- bcs[,union(columns, ref)]
+  }
+
   for(j in 1:ncol(bcs))
     bcs[,j] <- as.factor(bcs[,j])
   levs <- lapply(bcs, levels)
@@ -79,9 +86,13 @@ align_classes <- function(d, ref) {
     levels(bcs[,i]) <- lookup[order(as.integer(lookup[,2])),1]
     bcs[,i] <- as.factor(as.character(bcs[,i]))
   }
+
+  # Adding back the remaining columns 
+  if (!is.null(columns)){
+    bcs <- cbind(bcs, as.data.frame(d)[, setdiff(all_cols, colnames(bcs))])
+  }
   
-  bcs
-  
+  return(bcs)
 }
 
 spot_entropy <- function(spatial_coords, label, k=6) {
@@ -205,10 +216,11 @@ solve_ensemble <- function(Results.clustering,
   k <- 1
 
   while (k <= niter) {
+    st <- proc.time()
     if(k == 1){
       loss_all_temp <- 0
       # Generate the first loss value 
-      temp2 <-  sapply(Results.clustering, L2_norm, Y = H)
+      temp2 <-  sapply(Results.clustering, JSD_Matrix, Y = H)
       # Empricial estimation of lambda in the paper
       if(is.null(lambda)){
         lambda <- quantile(temp2, probs = prob.quantile)
@@ -217,13 +229,13 @@ solve_ensemble <- function(Results.clustering,
       loss_all_temp <- loss_all
     }
     ##### update w
-    temp2 <-  sapply(Results.clustering, L2_norm, Y = H)
+    temp2 <-  sapply(Results.clustering, JSD_Matrix, Y = H)
     w <- exp(-temp2/lambda)/sum(exp(-temp2/lambda))
     ##### update H
     H <-  Reduce("+", Map("*", Results.clustering, w))
 
     # Objective function loss
-    loss_main <- sum(sapply(Results.clustering, L2_norm, Y = H) * w)
+    loss_main <- sum(sapply(Results.clustering, JSD_Matrix, Y = H) * w)
     loss_entropy <- sum(w * log(w))
     loss_all <- loss_main + lambda * loss_entropy
 
@@ -232,10 +244,11 @@ solve_ensemble <- function(Results.clustering,
 
     # Stopping criteria
     diff_iter <- abs(loss_all - loss_all_temp)
+    delta <- proc.time() - st 
     if (verbose){
       cat("iter: ", k, "loss_main: ", loss_main, "loss_entropy: ", loss_entropy,
-          "loss_all: ", loss_all, "lambda: ", lambda, "diff",
-          diff_iter, "\n")
+          "loss_all: ", loss_all, "lambda: ", lambda, "diff:", 
+          diff_iter, "epoch_time:", delta, "\n")
     }
 
     if(diff_iter < epsilon | k >= niter){
@@ -249,7 +262,110 @@ solve_ensemble <- function(Results.clustering,
 
 }
 
-L2_norm <- function(X, Y){
-  return(sqrt(sum((X-Y)^2)))
+JSD_Matrix <- function(X, Y, epi=1e-10){
+  # Flatten the matrix, get probability, add a pseudo-count
+  x <- pmax(as.vector(X)/sum(X), epi)
+  y <- pmax(as.vector(Y)/sum(Y), epi)
+  m <- (x + y)/2
+
+  # Make the JSD bounded by 1 by using log2
+  JSD <- sqrt(0.5 * (sum(x * log2(x / m)) +
+                     sum(y * log2(y / m))))
+  return(JSD)
 }
 ########### ensemble strategy ###########
+
+#' Get binary similarity matrix from a cluster vector,
+get_binary_matrix <- function(cluster_vector){
+  suppressPackageStartupMessages(require(Matrix))
+  N <- length(cluster_vector)
+
+  pairs <- which(outer(cluster_vector, cluster_vector, FUN = "=="), arr.ind = TRUE)
+  # Remove diagonal entries
+  pairs <- pairs[pairs[,1] != pairs[,2], ]
+
+  # Create a sparse matrix using the pairs of indices
+  bm <- Matrix::sparseMatrix(
+    i = pairs[,1],
+    j = pairs[,2],
+    x = rep(1, nrow(pairs)),
+    dims = c(N, N)
+  )
+
+  return(bm)
+}
+
+#' Get cluster label from Leiden clustering of the consensus binary matrix.
+#' Using also binary_search function to ensure the proper number of clusters
+get_cluster_label <- function(binary_matrix,
+                              n_clust_target,
+                              resolution_update = 2,
+                              resolution_init = 0.5,
+                              num_rs = 100,
+                              tolerance = 1e-5,
+                              verbose=FALSE){
+  suppressPackageStartupMessages(require(igraph))
+  # require(leidenalg)
+
+  graph <- igraph::graph_from_adjacency_matrix(binary_matrix,
+                                       mode = "upper",
+                                       weighted = TRUE,
+                                       diag = FALSE)
+  if (verbose){cat("Weighted neighborhood graph created... \n")}
+
+  # Initialize boundaries
+  lb <- rb <- NULL
+  n_clust <- -1
+
+  res <-  resolution_init
+  result <- igraph::cluster_leiden(graph, resolution = res)
+  # Adjust cluster_ids extraction per method
+  n_clust <- length(unique(result$membership))
+  if (n_clust > n_clust_target) {
+    while (n_clust > n_clust_target && res > 1e-5) {
+      rb <- res
+      res <- res / resolution_update
+      result <- igraph::cluster_leiden(graph, resolution = res)
+      n_clust <- length(unique(result$membership))
+      if (verbose){cat(sprintf("Boundary search..lb = %s, rb = %s, n_clust=%s \n", res, rb, n_clust))}
+    }
+    lb <- res
+  } else if (n_clust < n_clust_target) {
+    while (n_clust < n_clust_target) {
+      lb <- res
+      res <- res * resolution_update
+      result <- igraph::cluster_leiden(graph, resolution = res)
+      n_clust <- length(unique(result$membership))
+      if (verbose){cat(sprintf("Boundary search..lb = %s, rb = %s, n_clust=%s \n", lb, res, n_clust))}
+    }
+    rb <- res
+  }
+  if (n_clust == n_clust_target) {lb = rb = res}
+
+  i <- 0
+  if (verbose){cat(sprintf("Boundary search done. lb = %s, rb = %s, res = %s, n_clust=%s \n", lb, rb, res, n_clust))}
+
+  while ((rb - lb > tolerance || lb == rb) && i < num_rs) {
+    mid <- sqrt(lb * rb)
+    # message("Resolution: ", mid)
+    result <- igraph::cluster_leiden(graph, resolution = mid)
+    n_clust <- length(unique(result$membership))
+    if (verbose){cat(sprintf("iter: %s, res: %s, n_clust: %s \n", i,  mid, n_clust))} # nolint
+    if (n_clust == n_clust_target || lb == rb) break
+    if (n_clust > n_clust_target) {
+      rb <- mid
+    } else {
+      lb <- mid
+    }
+    i <- i + 1
+  }
+
+  # Warning if target not met
+  if (n_clust != n_clust_target) {
+    warning(sprintf("Warning: n_clust = %d not found in binary search, return best approximation with res = %f and n_clust = %d. (rb = %f, lb = %f, i = %d)", n_clust_target, mid, n_clust, rb, lb, i))
+  }
+
+  cluster_vector <- result$membership
+  return(cluster_vector)
+}
+
