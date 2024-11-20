@@ -3,3 +3,4 @@ quarto render ensemble-pipeline-01-explore.qmd --execute-params yml/thalamus-680
 #quarto render ensemble-pipeline-01-explore.qmd --execute-params yml/thalamus-8000-explore.yml --output thalamus-8000-explore.html
 #quarto render ensemble-pipeline-01-explore.qmd --execute-params yml/libd-Br5292_151507-explore.yml --output libd-Br5292_151507-explore.html
 #quarto render ensemble-pipeline-01-explore.qmd --execute-params yml/visium_hd-explore.yml --output visium_hd-explore-explore.html
+quarto render ensemble-pipeline-02-consensus.qmd --execute-params yml/thalamus-6800-consensus.yml --output thalamus-6800-consensus.html
