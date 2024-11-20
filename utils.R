@@ -199,6 +199,10 @@ solve_ensemble <- function(Results.clustering,
                           niter = 100, 
                           epsilon = 1e-5,
                           verbose = FALSE){
+  suppressPackageStartupMessages(require(future.apply))
+
+  plan(multisession, workers = parallelly::availableCores() - 1)
+
   options(digits = 7)
   # Results.clustering <- Results.clustering.all[[1]]
   num.methods <- length(Results.clustering)
@@ -220,7 +224,7 @@ solve_ensemble <- function(Results.clustering,
     if(k == 1){
       loss_all_temp <- 0
       # Generate the first loss value 
-      temp2 <-  sapply(Results.clustering, JSD_Matrix, Y = H)
+      temp2 <-  future_sapply(Results.clustering, JSD_Matrix, Y = H)
       # Empricial estimation of lambda in the paper
       if(is.null(lambda)){
         lambda <- quantile(temp2, probs = prob.quantile)
@@ -229,7 +233,7 @@ solve_ensemble <- function(Results.clustering,
       loss_all_temp <- loss_all
     }
     ##### update w
-    temp2 <-  sapply(Results.clustering, JSD_Matrix, Y = H)
+    temp2 <-  future_sapply(Results.clustering, JSD_Matrix, Y = H)
     w <- exp(-temp2/lambda)/sum(exp(-temp2/lambda))
     ##### update H
     H <-  Reduce("+", Map("*", Results.clustering, w))
@@ -248,7 +252,7 @@ solve_ensemble <- function(Results.clustering,
     if (verbose){
       cat("iter: ", k, "loss_main: ", loss_main, "loss_entropy: ", loss_entropy,
           "loss_all: ", loss_all, "lambda: ", lambda, "diff:", 
-          diff_iter, "epoch_time:", delta, "\n")
+          diff_iter, "epoch_time:", delta[3], "\n")
     }
 
     if(diff_iter < epsilon | k >= niter){
