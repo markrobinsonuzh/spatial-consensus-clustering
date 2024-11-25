@@ -200,7 +200,7 @@ solve_ensemble <- function(Results.clustering,
                           epsilon = 1e-5,
                           verbose = FALSE){
   suppressPackageStartupMessages(require(future.apply))
-
+  
   plan(multisession, workers = parallelly::availableCores() - 1)
 
   options(digits = 7)
@@ -325,6 +325,7 @@ get_cluster_label <- function(binary_matrix,
   result <- igraph::cluster_leiden(graph, resolution = res)
   # Adjust cluster_ids extraction per method
   n_clust <- length(unique(result$membership))
+  if (verbose){cat(sprintf("Boundary search starts..res = %s, n_clust=%s \n", res, n_clust))}
   if (n_clust > n_clust_target) {
     while (n_clust > n_clust_target && res > 1e-5) {
       rb <- res
@@ -344,7 +345,9 @@ get_cluster_label <- function(binary_matrix,
     }
     rb <- res
   }
-  if (n_clust == n_clust_target) {lb = rb = res}
+  if (n_clust == n_clust_target) {
+    lb = rb = res
+    return(result$membership)}
 
   i <- 0
   if (verbose){cat(sprintf("Boundary search done. lb = %s, rb = %s, res = %s, n_clust=%s \n", lb, rb, res, n_clust))}

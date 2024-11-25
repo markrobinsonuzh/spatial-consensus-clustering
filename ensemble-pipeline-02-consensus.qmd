@@ -23,6 +23,8 @@ params:
   nns: 6
   name: "noname"
   nclust: 16
+  pt_size: 0.5
+  consensus_methods: null
 ---
 
 ## Retrieve parameters
@@ -35,7 +37,8 @@ gt <- params$ground_truth
 nclust <- params$nclust
 nmethod <- params$nmethod
 k <- params$nns
-
+pt_size <- params$pt_size
+m_con <- params$consensus_methods
 # # for testing
 # name <- "thalamus-6800"
 # datadir <- "data/C57BL6J-638850_6800"
@@ -100,8 +103,8 @@ fn_stub <- paste0(name, "_nclust-", nclust, "_nmeth-", nmethod)
 # @TODO: Parameterize sw and m size for different ensemble cluster numbers
 # Threshold for smoothness
 keep <- mses[mses < .18]
-# List of number of methods for inclusion
-sw <- seq(4,20,by=2)
+# List of number of methods for inclusion, considering the limit for methods
+sw <- seq(4,min(20, length(keep)-1),by=2)
 # Matrix storing runtime (tm) and resulting smoothness(m)
 tm <- m <- matrix(NA, nrow=5, ncol=length(sw))
 # Setting up indication
@@ -149,19 +152,28 @@ for(j in 1:ncol(m)) {
 
 
 
-pheatmap(m, cluster_rows = FALSE, 
+m1 <- pheatmap(m, cluster_rows = FALSE, 
          cluster_cols = FALSE, 
          display_number = TRUE,
          color = colorRampPalette(c("gray90","deeppink4"))(30),
          main = "Average spot entropy")
 
-pheatmap(tm, cluster_rows = FALSE, 
+m2 <- pheatmap(tm, cluster_rows = FALSE, 
          cluster_cols = FALSE, 
          display_number = TRUE,
          color = colorRampPalette(c("gray90","deeppink4"))(30),
          main = "runtime")
 
+pdf(paste0(fn_stub, "00_cluster_scan.pdf"), width=7, height=5)
+grid::grid.newpage()
+grid::grid.draw(m1$gtable)
+grid::grid.newpage()
+grid::grid.draw(m2$gtable)
+dev.off()
 
+m1
+print(" ")
+m2
 ```
 
 
@@ -191,14 +203,18 @@ dim(base_clusterings)
 
 ```{r form-consensus, fig.height=6, fig.width=10, eval=TRUE}
 
-# # bit slow
-cat("LCA: \n")
-system.time(df$consensus_lca <- diceR:::LCA(base_clusterings,
-                                            is.relabelled = FALSE, seed = 100))
+if ("lca" %in% m_con){
+  # # bit slow
+  cat("LCA: \n")
+  system.time(df[[sprintf("consensus_lca_%s", nmethod)]] <- diceR:::LCA(base_clusterings,
+                                              is.relabelled = FALSE, seed = 100))
+}
 
-cat("K-modes: \n")
-system.time(df$consensus_kmodes <- diceR:::k_modes(base_clusterings,
-                                                   is.relabelled = FALSE, seed = 1))
+if ("kmodes" %in% m_con){
+  cat("K-modes: \n")
+  system.time(df[[sprintf("consensus_kmodes_%s", nmethod)]] <- diceR:::k_modes(base_clusterings,
+                                                    is.relabelled = FALSE, seed = 1))
+}
 
 ```
 
@@ -208,32 +224,34 @@ system.time(df$consensus_kmodes <- diceR:::k_modes(base_clusterings,
 
 # selected_clusters <- df[,names(mses)] %>% 
 #                      dplyr::select(names(real_n), !starts_with("seurat"), !starts_with("scanpy"))))
-selected_clusters <- base_clusterings
+if ("weighted" %in% m_con){
+  selected_clusters <- base_clusterings
 
+  # Get binary matrix for individual clustering
+  binary_matrices <- lapply(selected_clusters, get_binary_matrix)
 
-# Get binary matrix for individual clustering
-binary_matrices <- lapply(selected_clusters, get_binary_matrix)
+  # Get consensus clustering from KL EnSDD method
+  st <- proc.time()
+  ensemble_result <- solve_ensemble(Results.clustering = binary_matrices, verbose=TRUE)
 
-# Get consensus clustering from KL EnSDD method
-st <- proc.time()
-ensemble_result <- solve_ensemble(Results.clustering = binary_matrices, verbose=TRUE)
+  # Resulting binary matrix
+  binary_ensemble <- ensemble_result$H
+  weight_vector <- ensemble_result$w
 
-# Resulting binary matrix
-binary_ensemble <- ensemble_result$H
-weight_vector <- ensemble_result$w
+  # Ensemble labelling
+  ensemble_label <- get_cluster_label(binary_ensemble, n_clust_target=nclust, verbose=TRUE)
+  delta_ensemble <- proc.time() - st
 
-# Ensemble labelling
-ensemble_label <- get_cluster_label(binary_ensemble, n_clust_target=nclust, verbose=FALSE)
-delta_ensemble <- proc.time() - st
+  cat("Weighted Ensemble: \n")
+  print(delta_ensemble)
 
-cat("Weighted Ensemble: \n", delta_ensemble)
-
-# Save ensemble results
-df$consensus_weighted <- ensemble_label
+  # Save ensemble results
+  df[[sprintf("consensus_weighted_%s", nmethod)]] <- ensemble_label
+}
 ```
 
-```{r visualization consensus results, fig.height=6, fig.width=10, eval=TRUE}
-plot_cols <- c("consensus_lca", "consensus_weighted", "consensus_kmodes")
+```{r visualization consensus results, fig.height=6, fig.width=10, eval=FALSE}
+plot_cols <- paste0("consensus_", m_con, "_", nmethod)
 # plot_cols <- c("consensus_kmodes", gt)
 
 ps <- vector("list", length(plot_cols)*length(gt))
@@ -255,7 +273,7 @@ for(i in 1:length(plot_cols)) {
       se <- spot_entropy(coords[,c("row","col")],
                          df[[u]], k=k)
       ggplot(df, aes(x=row, y=col, colour=as.factor(.data[[u]]))) +
-        geom_point(size = .5) +
+        geom_point(size = pt_size) +
         theme_classic() +
         theme(legend.position = "none") +
         xlab("") + ylab("") +
@@ -276,7 +294,7 @@ for(i in 1:length(plot_cols)) {
     df$spot_agreement <- sem$SpatialSPC
 
     psb[[length(psb)+1]] <- ggplot(df, aes(row, col, colour = spot_agreement)) + 
-      geom_point(size = .5) + 
+      geom_point(size = pt_size) + 
       scale_colour_gradient(low="gray90", high="deeppink4") +
       theme(legend.position = "none") +
       scale_x_continuous(expand = expansion(0,1)) +
@@ -288,7 +306,7 @@ for(i in 1:length(plot_cols)) {
       ggtitle("spotAgreement")
     
     psb[[length(psb)+1]] <- ggplot(df, aes(row, col, colour = 1-spot_agreement)) + 
-      geom_point(size = .5) +
+      geom_point(size = pt_size) +
       scale_colour_gradient(low="gray90", high="deeppink4") +
       theme(legend.position = "none") +
       scale_x_continuous(expand = expansion(0,1)) +
@@ -314,6 +332,12 @@ ggsave(filename = paste0(fn_stub, "_01-consensus.pdf"),
 ```
 
 ```{r plot weight results, fig.height=6, fig.width=10, eval=TRUE}
+if (!("weighted" %in% m_con)){
+  con_lab <- paste0("consensus_", m_con[1], "_", nmethod)
+  cat(sprintf("weighted consensus are not done, try using ARI with %s as weight vector instead. \n", con_lab))
+  weight_vector <- apply(base_clusterings, 2, mclust::adjustedRandIndex, y=df[[con_lab]])
+}
+
 weight_vector <- weight_vector %>% sort(decreasing=TRUE)
 weight_df <- weight_vector %>% 
             sort() %>% 
@@ -321,7 +345,9 @@ weight_df <- weight_vector %>%
             setNames("weights") %>% 
             rownames_to_column("instance") %>%
             mutate(instance = factor(instance, levels = instance))
+```
 
+```{r plot base clsuterings and weight vectors}
 weight_bar <- ggplot(weight_df, aes(x=instance, y=weights)) +
               geom_bar(stat="identity") + 
               geom_text(aes(label=round(.data$weights, digit=3)), 
@@ -349,7 +375,7 @@ plot_list <- lapply(c("consensus_weighted", names(weight_vector), gt), function(
                     paste(label, weight_vector[label], sep="_"),
                     label)
   p <- ggplot(aligned_bases, aes(x=row, y=col, colour=as.factor(.data[[label]]))) +
-        geom_point(size = .5) +
+        geom_point(size = pt_size) +
         theme_classic() +
         theme(legend.position = "none") +
         xlab("") + ylab("") +
@@ -378,8 +404,8 @@ ggsave(filename = paste0(fn_stub, "_03_KLWEB-base-clusterings.pdf"),
 ```
 
 ```{r save results, eval=TRUE}
-write.table(df, file.path(datadir, paste0("df_consensus_", name, ".tsv")), sep="\t")
-write.table(weight_df, file.path(datadir, paste0("weights_consensus_", name, ".tsv")), sep="\t")
+write.table(df, file.path(datadir, paste0("df_consensus_", name, "_", nmethod, ".tsv")), sep="\t")
+write.table(weight_df, file.path(datadir, paste0("weights_consensus_", name, "_", nmethod, ".tsv")), sep="\t")
 ```
 
 ## sessionInfo()
