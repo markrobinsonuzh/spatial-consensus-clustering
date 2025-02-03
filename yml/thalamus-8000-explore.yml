@@ -1,15 +1,9 @@
-name: thalamus-7200
-datadir: data/C57BL6J-638850_7200
+name: thalamus-8000
+datadir: ../../data/abc_atlas_wmb_thalamus/C57BL6J-638850_8000
 nclust_range: 
-  - 12
-  - 13
-  - 14
-  - 15
   - 16
-  - 17
-  - 18
-  - 19
   - 20
+  - 24
 nmethod_range:
   - 3
   - 4

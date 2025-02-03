@@ -27,6 +27,7 @@ params:
     - 12
   nsmoothest: 30
   obs_filter: NULL
+# output-dir: "output"
 ---
 
 ## Retrieve parameters
@@ -80,7 +81,7 @@ suppressPackageStartupMessages({
   library(fastDummies)
   library(randomcoloR)
   library(reshape2)
-  library(ClusteringMetrics)
+  library(poem)
   library(gridExtra)
 })
 source("utils.R")
@@ -90,10 +91,11 @@ source("utils.R")
 ## Load data
 
 ```{r load-data}
-spe <- get_SpatialExperiment(file.path(datadir, "features.tsv"), 
-                             file.path(datadir, "observations.tsv"), 
-                             file.path(datadir, "coordinates.tsv"), 
-                             file.path(datadir, "counts.mtx"))
+# using the QC-ed results to avoid misalignments
+spe <- get_SpatialExperiment(file.path(datadir, "qc/features.tsv"), 
+                             file.path(datadir, "qc/observations.tsv"), 
+                             file.path(datadir, "qc/coordinates.tsv"), 
+                             file.path(datadir, "qc/counts.mtx"))
 
 # not sure this is the best normalization
 spe <- logNormCounts(spe)
@@ -111,12 +113,30 @@ spe$col <- spatialCoords(spe)[,"y"]
 
 spe
 
-suppressMessages(obs <- read_tsv(file.path(datadir, "observations.tsv"),
-                                 show_col_types = FALSE))
+obs_dir <- file.path(datadir, "qc/observations.tsv")
+suppressMessages(obs <- read_tsv(obs_dir, col_types=paste0("c", rep("?", ncol(read_tsv(obs_dir))-1))))
 colnames(obs)[1] <- "id"
+if ("selected" %in% colnames(obs)) {
+    obs <- obs[as.logical(obs$selected), ]
+  }
 
 # check that SpatialExperiment and GT are aligned
 stopifnot(colnames(spe)==obs$id)
+
+if (!(any(gt %in% colnames(colData(spe))))){
+  gt_dir <- file.path(datadir, "labels.tsv")
+  suppressMessages(gtLabels <- read_tsv(gt_dir, col_types=paste0("c", rep("?", ncol(read_tsv(gt_dir))-1))))
+  # Match the labels to barcodes after QC
+  spe[[gt]] <- gtLabels[match(colnames(spe), gtLabels[[1]]), 2]
+  obs[gt] <- gtLabels[match(obs$id, gtLabels[[1]]), 2]
+  # Only barcodes with labels are useful for subsequent analysis
+  spe <- spe[, !is.na(spe[[gt]])]
+  obs <- obs[!is.na(obs[gt]), ]
+
+  # Check how many na value there are
+  is.na(obs[gt]) %>% sum()
+}
+
 
 # remove unconfident labels (if any)
 if(!is.null(obs_filter)) {
@@ -124,6 +144,7 @@ if(!is.null(obs_filter)) {
     dplyr::filter(eval(parse(text = obs_filter)))
 }
 
+# Check number of ground truth labels
 ap <- apply(obs[,-1], 2, function(u) length(unique(u)))
 ap[gt]
 
@@ -140,7 +161,8 @@ base_clusterings <- lapply(lf, function(u) {
   meth <- strsplit(u,"/", fixed = TRUE)[[1]][inds] %>%
     paste0(collapse = "_")
   meth <- gsub("_config","",meth) 
-  suppressMessages(df <- read_tsv(u, show_col_types = FALSE))
+  suppressMessages(df <- read_tsv(u, col_types=paste0("c", rep("?", ncol(read_tsv(u))-1)),
+))
   colnames(df)[1] <- "id"
   if( all(sapply(sapply(df$id, strsplit, ""), .subset, 1)=="x") ) {
     # hack for spatialGE -- if all ids begin with x, remove it
@@ -167,6 +189,7 @@ base_clusterings <- base_clusterings[m,]
 m <- match(obs$id, colnames(spe))
 spe <- spe[,m]
 
+# return error due to NA in base cluster df, some filtering of the obs might be needed?
 stopifnot(all(base_clusterings$id==obs$id))
 stopifnot(all(base_clusterings$id==colnames(spe)))
 
@@ -370,10 +393,10 @@ for(i in 1:length(bases)) {
     sem <- getSpatialExternalMetrics(true = as.factor(obs[[gt[j]]]),
                                      pred = base_clusterings[[nm]], 
                                      location = df[,c("row","col")],
-                                     metrics = "spotAgreement",
+                                     metrics = "SpatialSPC",
                                      level = "element", k = k,
                                      useNegatives = FALSE)
-    df$spot_agreement <- sem$spotAgreement
+    df$spot_agreement <- sem$SpatialSPC
 
     bb <- ggplot(df, aes(row, col, colour = spot_agreement)) + 
       geom_point(size = .5) + 
