@@ -169,6 +169,10 @@ colnames(base_clusterings) <- gsub("_label","", colnames(base_clusterings))
 
 all(base_clusterings$barcode_id == spe$barcode_id)
 
+# "-" this causes problems later (with LCA)
+colnames(base_clusterings) <- gsub("SCAN-IT", "SCANIT", 
+                                   colnames(base_clusterings))
+
 
 ```
 
@@ -265,7 +269,7 @@ ggsave(filename = paste0("smoothness-entropy.pdf"),
        plot = marrangeGrob(p, nrow=1, ncol=3),
        width = 12, height = 6)
 
-all_mses
+# all_mses
 
 
 ```
@@ -285,9 +289,9 @@ rownames(anno_row) <- names(all_mses)
 
 anno_row$n_clust <- real_n[rownames(anno_row)]
 
-# ph_all <- pheatmap(aris_all, fontsize = 5, annotation_row = anno_row)
+ph_all <- pheatmap(aris_all, fontsize = 5, annotation_row = anno_row)
 
-clust <- cutree(ph_all$tree_row, k=2)
+clust <- cutree(ph_all$tree_row, k=4)
 calc_summary(ph_all$tree_row, aris_all, 2, "annotation")
 
 anno_row$clust <- clust[rownames(anno_row)]
@@ -381,7 +385,7 @@ for(nmethod in nmethod_range) {
       
     # use "smoothest" as reference?
     ref_clustering <- rownames(short_list) %>% head(1)
-    # use "middle-smoothest" as reference?
+    # # use "middle-smoothest" as reference?
     # ref_clustering <- rownames(short_list)[floor(nmethod/2)]
     # use "least-smooth" as reference
     # ref_clustering <- rownames(short_list) %>% tail(1)
@@ -434,101 +438,85 @@ ph_cents <- pheatmap(cents, cluster_rows = FALSE,
 save_pheatmap_pdf(ph_cents, "figure-4-heatmap-across-entropy.pdf", 
                   width = 3, height=5)
 
-
 ```
 
 
-## Base clusterings with spatial metrics
+## Run leave-1-out (L1O) business
 
-```{r base-clusterings-viz, fig.width=10, fig.height=10, eval=TRUE}
 
-bases <- all_mses %>% sort %>% head(nsmoothest)
-bcs <- vector("list", length(bases)*length(gt))
-count <- 1
+```{r ari-leave1out}
 
-for(i in 1:length(bases)) {
-  
-  nm <- names(bases)[i]
-  nclust <- real_n[nm]
-  
-  palette <- distinctColorPalette(nclust)
-  names(palette) <- 1:nclust
-  
-  df$this_base <- as.factor(base_clusterings[[nm]])
-
-  aa <- ggplot(df, aes(x=row, y=col, colour=this_base)) + 
-    geom_point(size = .5) +
-    theme_classic() +
-    theme(legend.position = "none") +
-    xlab("") + ylab("") +
-    scale_colour_manual(values = palette) +
-    scale_x_continuous(expand = expansion(0,1)) +
-    scale_y_continuous(expand = expansion(0,1)) +
-    ggtitle(nm) + coord_fixed()
-  
-  for(j in 1:length(gt)) {
-    
-    sem <- getSpatialExternalMetrics(true = as.factor(obs[[gt[j]]]),
-                                     pred = base_clusterings[[nm]], 
-                                     location = df[,c("row","col")],
-                                     metrics = "spotAgreement",
-                                     level = "element", k = k,
-                                     useNegatives = FALSE)
-    df$spot_agreement <- sem$spotAgreement
-
-    bb <- ggplot(df, aes(row, col, colour = spot_agreement)) + 
-      geom_point(size = .5) + 
-      scale_colour_gradient(low="gray90", high="deeppink4") +
-      theme(legend.position = "none") +
-      scale_x_continuous(expand = expansion(0,1)) +
-      scale_y_continuous(expand = expansion(0,1)) +
-      theme_classic() +
-      theme(legend.position = "none") +
-      xlab("") + ylab("") +
-      coord_fixed() +
-      ggtitle("spotAgreement")
-    
-    cc <- ggplot(df, aes(row, col, colour = 1-spot_agreement)) + 
-      geom_point(size = .5) +
-      scale_colour_gradient(low="gray90", high="deeppink4") +
-      theme(legend.position = "none") +
-      scale_x_continuous(expand = expansion(0,1)) +
-      scale_y_continuous(expand = expansion(0,1)) +
-      theme_classic() +
-      theme(legend.position = "none") +
-      xlab("") + ylab("") +
-      coord_fixed() +
-      ggtitle("1-spotAgreement")
-    
-    df$ground_truth <- as.factor(obs[[gt[j]]])
-    ngt <- length(unique(df$ground_truth))
-    set.seed(1234)
-    palette <- distinctColorPalette(ngt)
-    names(palette) <- levels(df$gt)
-    
-    dd <- ggplot(df, aes(x=row, y=col, colour=ground_truth)) + 
-      geom_point(size = .5) +
-      theme_classic() +
-      theme(legend.position = "none") +
-      xlab("") + ylab("") +
-      scale_colour_manual(values = palette) +
-      scale_x_continuous(expand = expansion(0,1)) +
-      scale_y_continuous(expand = expansion(0,1)) +
-      ggtitle(gt[j]) + coord_fixed()
-    
-    bcs[[count]] <- plot_grid(aa,dd,bb,cc, nrow=2, ncol=2)
-    show(bcs[[count]])
-    count <- count+1
-
-  }
-
+# apparently the clusters need to be numbered 1-N for LCA
+for(i in 1:ncol(base_clusterings)) {
+  base_clusterings[,i] <- base_clusterings[,i]-min(base_clusterings[,i])+1
 }
 
-ggsave(filename = paste0(fn_stub, "_04_base-clusterings.pdf"),
-       plot = marrangeGrob(bcs, nrow=1, ncol=1),
-       width = 9, height = 5)
+hack <- grep("SOTIP", colnames(base_clusterings))
+for(i in hack) {
+  base_clusterings[,i] <- as.numeric(as.factor(base_clusterings[,i]))
+}
 
+apply(base_clusterings[,-1], 2, range)[,1:10]
+
+
+calc_ari <- mclust::adjustedRandIndex
+
+top_smoothest <- 12
+
+l1o_methods <- anno_row %>% filter(clust==2,
+                                   meth != "annotation")
+
+aris <- matrix(NA, nrow = nrow(l1o_methods),
+               ncol = 2, dimnames = list(rownames(l1o_methods),
+                                         c("ARI_L1O_consensus",
+                                           "ARI_annotation"))) %>% as.data.frame
+
+for(nclust in nclust_range) {
+  
+  cat(nclust, "----\n")
+  these_methods <- l1o_methods %>% filter(n_clust==nclust)
+  
+  for(i in 1:nrow(these_methods)) {
+    
+    this_meth <- rownames(these_methods)[i]
+    exclude <- these_methods$meth[i]
+    
+    to_combine <- these_methods %>%
+      arrange(entropy) %>%
+      filter(meth != exclude) %>%
+      filter(!duplicated(meth)) %>%
+      head(top_smoothest)
+    
+    system.time(lca_l1o <- diceR:::LCA(base_clusterings[,rownames(to_combine)],
+                                       is.relabelled = FALSE, seed = 100))
+    
+    
+    aris[this_meth,"ARI_L1O_consensus"] <- calc_ari(lca_l1o,
+                                                    base_clusterings[,this_meth])
+    aris[this_meth,"ARI_annotation"] <- calc_ari(spe$ground_truth,
+                                                 base_clusterings[,this_meth])
+    
+    cat(this_meth, "\n")
+    
+    
+  }
+  
+}
+
+
+aris$nclust <- as.factor(anno_row[rownames(aris),"n_clust"])
+
+(p <- ggplot(aris, aes(x = ARI_annotation, y = ARI_L1O_consensus, 
+                      colour=nclust)) +
+  geom_point(size = 3)) +
+  xlab("ARI: annotation") + ylab("ARI: leave one out")
+
+
+ggsave("figure4-aris-L10-anno.pdf", p, height = 5, width = 6)
+
+    
 ```
+
 
 
 ## sessionInfo()
