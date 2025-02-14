@@ -66,8 +66,9 @@ align_classes <- function(d, ref, columns=NULL) {
     bcs <- bcs[,union(columns, ref)]
   }
 
-  for(j in 1:ncol(bcs))
-    bcs[,j] <- as.factor(bcs[,j])
+  for(j in 1:ncol(bcs)){
+    bcs[,j] <- factor(bcs[,j], levels = unique(bcs[,j])) %>% as.numeric %>% as.factor()
+  }
   levs <- lapply(bcs, levels)
   n_levs <- sapply(levs, length)
   
@@ -307,7 +308,8 @@ get_cluster_label <- function(binary_matrix,
                               resolution_init = 0.5,
                               num_rs = 100,
                               tolerance = 1e-5,
-                              verbose=FALSE){
+                              verbose=FALSE,
+                              min_target=NULL){
   suppressPackageStartupMessages(require(igraph))
   # require(leidenalg)
 
@@ -315,23 +317,42 @@ get_cluster_label <- function(binary_matrix,
                                        mode = "upper",
                                        weighted = TRUE,
                                        diag = FALSE)
+  write.table(as_data_frame(graph, what="edges") %>% sort("from"), 
+              "edgeList.txt", sep="\t", 
+              col.names=FALSE, row.names=FALSE)
   if (verbose){cat("Weighted neighborhood graph created... \n")}
 
   # Initialize boundaries
   lb <- rb <- NULL
   n_clust <- -1
+  if (is.null(min_target)){
+    min_target <- nrow(binary_matrix)/(10*n_clust_target)
+  }
+  print(min_target)
+
+  get_clusters <- function(graph, resolution, mt=min_target){
+
+    if (!file.exists("networkanalysis-1.3.0.jar")){
+      system("wget https://repo1.maven.org/maven2/nl/cwts/networkanalysis/1.3.0/networkanalysis-1.3.0.jar")
+    }
+    system(sprintf("java -cp networkanalysis-1.3.0.jar nl.cwts.networkanalysis.run.RunNetworkClustering -w -m %1.0f -r %s -o cluster.txt edgeList.txt", mt, resolution))
+
+    results <- read.table("cluster.txt", header=TRUE, row.names=NULL)[,2]
+
+    return(results)
+  }
 
   res <-  resolution_init
-  result <- igraph::cluster_leiden(graph, resolution = res)
+  result <- get_clusters(graph, resolution = res)
   # Adjust cluster_ids extraction per method
-  n_clust <- length(unique(result$membership))
+  n_clust <- length(unique(result))
   if (verbose){cat(sprintf("Boundary search starts..res = %s, n_clust=%s \n", res, n_clust))}
   if (n_clust > n_clust_target) {
     while (n_clust > n_clust_target && res > 1e-5) {
       rb <- res
       res <- res / resolution_update
-      result <- igraph::cluster_leiden(graph, resolution = res)
-      n_clust <- length(unique(result$membership))
+      result <- get_clusters(graph, resolution = res)
+      n_clust <- length(unique(result))
       if (verbose){cat(sprintf("Boundary search..lb = %s, rb = %s, n_clust=%s \n", res, rb, n_clust))}
     }
     lb <- res
@@ -339,15 +360,13 @@ get_cluster_label <- function(binary_matrix,
     while (n_clust < n_clust_target) {
       lb <- res
       res <- res * resolution_update
-      result <- igraph::cluster_leiden(graph, resolution = res)
-      n_clust <- length(unique(result$membership))
+      result <- get_clusters(graph, resolution = res)
+      n_clust <- length(unique(result))
       if (verbose){cat(sprintf("Boundary search..lb = %s, rb = %s, n_clust=%s \n", lb, res, n_clust))}
     }
     rb <- res
   }
-  if (n_clust == n_clust_target) {
-    lb = rb = res
-    return(result$membership)}
+  if (n_clust == n_clust_target) {lb = rb = res}
 
   i <- 0
   if (verbose){cat(sprintf("Boundary search done. lb = %s, rb = %s, res = %s, n_clust=%s \n", lb, rb, res, n_clust))}
@@ -355,14 +374,18 @@ get_cluster_label <- function(binary_matrix,
   while ((rb - lb > tolerance || lb == rb) && i < num_rs) {
     mid <- sqrt(lb * rb)
     # message("Resolution: ", mid)
-    result <- igraph::cluster_leiden(graph, resolution = mid)
-    n_clust <- length(unique(result$membership))
-    if (verbose){cat(sprintf("iter: %s, res: %s, n_clust: %s \n", i,  mid, n_clust))} # nolint
-    if (n_clust == n_clust_target || lb == rb) break
+    result <- get_clusters(graph, resolution = mid)
+    n_clust <- length(unique(result))
+    min_clust_size <- min(table(result))
+    if (verbose){cat(sprintf("iter: %s, res: %s, n_clust: %s, min_clust_size: %s \n", i,  mid, n_clust, min_clust_size))} # nolint
+    if (n_clust == n_clust_target && min_clust_size >= min_target) break
     if (n_clust > n_clust_target) {
       rb <- mid
-    } else {
+    } else if (n_clust < n_clust_target){
       lb <- mid
+    } else if (n_clust == n_clust_target && min_clust_size < min_target){
+      rb <- mid
+      if (rb == lb){lb <- lb*0.9}
     }
     i <- i + 1
   }
@@ -372,7 +395,7 @@ get_cluster_label <- function(binary_matrix,
     warning(sprintf("Warning: n_clust = %d not found in binary search, return best approximation with res = %f and n_clust = %d. (rb = %f, lb = %f, i = %d)", n_clust_target, mid, n_clust, rb, lb, i))
   }
 
-  cluster_vector <- result$membership
+  cluster_vector <- result
   return(cluster_vector)
 }
 
