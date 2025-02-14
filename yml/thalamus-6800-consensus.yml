@@ -1,8 +1,18 @@
 name: thalamus-6800
-datadir: ../../data/abc_atlas_wmb_thalamus/C57BL6J-638850_6800
+datadir: ../../data/abc_atlas_wmb_thalamus_check/C57BL6J-638850_6800
 nclust: 20
 nmethod: 8
 ground_truth:
   - parcellation_structure
   - parcellation_substructure
 nns: 6
+consensus_methods:
+  - lca
+  - kmodes
+  - weighted
+nclust_list:
+  - 16
+  - 20
+  - 24
+  - 28
+pt_size: 0.5

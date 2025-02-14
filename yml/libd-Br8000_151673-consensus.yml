@@ -1,0 +1,22 @@
+name: libd_dlpfc-Br8100_151673
+datadir: ../../data/libd_dlpfc_check/Br8100_151673
+nclust_list: 
+  - 7
+  - 9
+  - 11
+  - 13
+  - 15
+  - 17
+  - 21
+ground_truth:
+  - label
+nns: 6
+pt_size: 0.8
+nclust: 7
+nmethod: 8
+consensus_methods:
+  - lca
+  - kmodes
+  - weighted
+spot_agreement:
+  - true

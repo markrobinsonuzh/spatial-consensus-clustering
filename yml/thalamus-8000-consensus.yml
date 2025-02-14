@@ -6,3 +6,12 @@ ground_truth:
   - parcellation_structure
   - parcellation_substructure
 nns: 6
+consensus_methods:
+  - lca
+  - kmodes
+  - weighted
+nclust_list:
+  - 16
+  - 20
+  - 24
+pt_size: 0.5
