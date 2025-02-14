@@ -133,7 +133,7 @@ if (!(any(gt %in% colnames(colData(spe))))){
   spe[[gt]] <- gtLabels[match(colnames(spe), gtLabels[[1]]), 2]
   obs[gt] <- gtLabels[match(obs$id, gtLabels[[1]]), 2]
   # Only barcodes with labels are useful for subsequent analysis
-  spe <- spe[, !is.na(spe[[gt]])]
+  spe <- spe[, !is.na(spe[[gt]])] 
   obs <- obs[!is.na(obs[gt]), ]
 
   # Check how many na value there are
@@ -509,3 +509,73 @@ saveRDS(all_mses,
 sessionInfo()
 ```
 
+
+
+```{r back up printing Visium HD spatial plot, eval=FALSE}
+library(ggrastr)
+df <- readRDS("/work/PRTNR/CHUV/DIR/rgottar1/spatial/Cluster_Benchmark/data/visium_hd_cancer_colon/visium_hd_cancer_colon_square_016um/df_visium_hd.rds")
+n_clusts <- apply(df, 2, function(x) unique(x)%>% length())
+cn <- table(n_clusts) %>% names() %>% as.numeric()
+cn <- cn[cn < 20]
+
+all_plots <- lapply(cn, function(cl){
+  cl_names <- which(n_clusts==cl) %>% names()
+  cl_names <- cl_names[!startsWith(cl_names, "seurat") & !startsWith(cl_names, "scanpy")]
+
+  palette <- distinctColorPalette(cl)
+  names(palette) <- 1:cl
+
+  plist <- lapply(cl_names, function(i){
+    df$this_base <- as.factor(df[[i]])
+    aa <- ggplot(df, aes(x=row, y=col, colour=this_base)) + 
+      geom_point(size = .01) + # %>% rasterise() +
+      theme_classic() +
+      theme(legend.position = "none") +
+      xlab("") + ylab("") +
+      scale_colour_manual(values = palette) +
+      scale_x_continuous(expand = expansion(0,1)) +
+      scale_y_continuous(expand = expansion(0,1)) +
+      ggtitle(i) + coord_fixed()
+  })
+  tiff("BC_VisiumHD.tiff", width=20, height=12, units = "in", res = 700)
+
+  return(plist)
+})
+
+tiff("BC_VisiumHD.tif", width=20, height=12, units = "in", res = 700)
+for (plist in all_plots){
+  grid.arrange(grobs=plist, ncol=4)
+}
+dev.off()
+
+```
+
+
+```{r}
+cl_names <- names(n_clusts)
+cl_names <- cl_names[!startsWith(cl_names, "seurat") & !startsWith(cl_names, "scanpy")]
+all_palette <- distinctColorPalette(max(cn))
+
+for (base in cl_names){
+
+  palette <- all_palette[1:n_clusts[base]] 
+  names(palette) <- 1:n_clusts[base]
+  df$this_base <- as.factor(df[[base]])
+  aa <- ggplot(df, aes(x=row, y=col, colour=this_base)) + 
+      geom_point(size = .01) + # %>% rasterise() +
+      theme_classic() +
+      theme(legend.position = "none") +
+      xlab("") + ylab("") +
+      scale_colour_manual(values = palette) +
+      scale_x_continuous(expand = expansion(0,1)) +
+      scale_y_continuous(expand = expansion(0,1)) +
+      ggtitle(base) + coord_fixed()
+
+  tiff(sprintf("BC_%s.tiff", base), width=8, height=8, units = "in", res = 700)
+  print(aa)
+  dev.off()
+}
+
+
+
+```

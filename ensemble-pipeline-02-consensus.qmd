@@ -405,7 +405,7 @@ ggsave(filename = paste0(fn_stub, "_03_KLWEB-base-clusterings.pdf"),
 
 ```{r save results, eval=TRUE}
 write.table(df, file.path(datadir, paste0("df_consensus_", name, "_", nmethod, ".tsv")), sep="\t")
-write.table(weight_df, file.path(datadir, paste0("weights_consensus_", name, "_", nmethod, ".tsv")), sep="\t")
+write.table(weight_df, file.path(datadir, paste0("weights_consensus_", name, "_nmeth_", nmethod, "_nclust_", nclust, ".tsv")), sep="\t")
 ```
 
 ## sessionInfo()
