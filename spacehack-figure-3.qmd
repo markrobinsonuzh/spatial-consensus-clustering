@@ -1,5 +1,5 @@
 ---
-title: "Code for Figure 4"
+title: "Code for Figure 3"
 format: 
     html:
       toc: true
@@ -13,16 +13,10 @@ editor_options:
 #params:
 #  datadir: 'test'
 #  nmethod_range:
-#    - 5
-#    - 8
 #  ground_truth:
-#    - x
-#    - y
 #  nns: 6
 #  name: "noname"
 #  nclust_range:
-#    - 10
-#    - 12
 #  nsmoothest: 30
 #  obs_filter: NULL
 ---
@@ -30,8 +24,8 @@ editor_options:
 ## Retrieve parameters
 
 ```{r display-params}
-datadir <- "data/libd-for-figure4"
-name <- "fig4"
+datadir <- "data/libd-for-figure3"
+name <- "fig3"
 nclust_range <- c(5,7,9)
 nmethod_range <- 5:12
 
@@ -314,7 +308,7 @@ anno_row$shown[rownames(anno_row) %in% show_set] <- 1
 ph_all <- pheatmap(aris_all, fontsize = 5, annotation_row = anno_row)
 
 # show(ph_all)
-save_pheatmap_pdf(ph_all, "figure-4-heatmap-all.pdf", 
+save_pheatmap_pdf(ph_all, "figure-3-heatmap-all.pdf", 
                   width = 9, height=8)
 
 all(rownames(coords)==rownames(cd))
@@ -435,7 +429,7 @@ ph_cents <- pheatmap(cents, cluster_rows = FALSE,
          cluster_cols = FALSE, 
          color = colorRampPalette(c("gray90","deeppink4"))(30))
 
-save_pheatmap_pdf(ph_cents, "figure-4-heatmap-across-entropy.pdf", 
+save_pheatmap_pdf(ph_cents, "figure-3-heatmap-across-entropy.pdf", 
                   width = 3, height=5)
 
 ```
@@ -512,7 +506,7 @@ aris$nclust <- as.factor(anno_row[rownames(aris),"n_clust"])
   xlab("ARI: annotation") + ylab("ARI: leave one out")
 
 
-ggsave("figure4-aris-L10-anno.pdf", p, height = 5, width = 6)
+ggsave("figure3-aris-L10-anno.pdf", p, height = 5, width = 6)
 
     
 ```
