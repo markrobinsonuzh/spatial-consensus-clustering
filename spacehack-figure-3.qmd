@@ -367,7 +367,7 @@ for(nmethod in nmethod_range) {
       scale_x_continuous(expand = expansion(0,1)) +
       scale_y_reverse(expand = expansion(0,1)) +
       coord_fixed() +
-      labs(title = paste0("ACE (", 
+      labs(title = paste0("CME (", 
                           nclust, " clusters, ",
                           nmethod, " methods)"),
            subtitle = paste0(strwrap(paste0(rownames(short_list), 
@@ -463,10 +463,13 @@ for(nclust in nclust_range) {
 
 aris$nclust <- as.factor(anno_row[rownames(aris),"n_clust"])
 
-(p <- ggplot(aris, aes(x = ARI_annotation, y = ARI_L1O_consensus, 
+library(ggpubr)
+
+p <- ggplot(aris, aes(x = ARI_annotation, y = ARI_L1O_consensus, 
                       colour=nclust)) +
-  geom_point(size = 3)) +
+  geom_point(size = 3) +
   scale_colour_manual(values = ann_colors$n_clust) +
+  stat_cor(size = 5) +
   xlab("ARI: annotation") + ylab("ARI: leave one out")
 
 
@@ -562,16 +565,46 @@ ph_all <- pheatmap(aris_all, fontsize = 5,
                    show_colnames = FALSE,
                    annotation_colors = ann_colors)
 
-save_pheatmap_pdf(ph_all, "figure-3-heatmap-all-withoutlabels.pdf", 
+
+
+save_pheatmap_pdf(ph_all, "figure-3-heatmap-all-withlabels-supplement.pdf", 
                   width = 9, height=8)
 
-ph_all <- pheatmap(aris_all, fontsize = 6, 
-                   annotation_row = anno_row, 
-                   annotation_colors = ann_colors)
+ph_all <- pheatmap(aris_all, fontsize = 8,
+                   treeheight_row = 15,
+                   treeheight_col = 15,
+                   show_rownames = FALSE,
+                   show_colnames = FALSE,
+                   annotation_row = anno_row %>% mutate(SE = entropy) %>% 
+                     dplyr::select(-clust, -meth, -entropy, -annotation), 
+                     #dplyr::select(-meth, -entropy, -annotation), 
+                   annotation_col = anno_row %>% dplyr::select(annotation), 
+                   annotation_colors = ann_colors,
+                   cutree_rows = 4, cutree_cols = 4)
 
+# https://stackoverflow.com/questions/78248771/how-to-use-pheatmap-in-r-to-draw-a-box-outside-a-pheatmap-plot-and-save-them-tog
+# (65+1)/(117+3)
+library(grid)
+rect1 <- ph_all$gtable$grobs[[3]]$children[[1]]
+rect2 <- grid::rectGrob(x = unit(0,"npc"), 
+                        y = unit(1-(65+1)/(117+3),"npc"),
+                        width = unit((65+1)/(117+3), "npc"), 
+                        height = unit((65+1)/(117+3), "npc"),
+                        just=c("left", "bottom"),
+                        gp=gpar(col="darkgreen", fill="transparent", lex=3))
+rect3 <- grid::rectGrob(x = unit(0,"npc"), 
+                        y = unit(1-(50)/(117+3),"npc"),
+                        width = unit((50)/(117+3), "npc"), 
+                        height = unit((50)/(117+3), "npc"),
+                        just=c("left", "bottom"),
+                        gp=gpar(col="blue", fill="transparent", lex=3))
 
-save_pheatmap_pdf(ph_all, "figure-3-heatmap-all-withlabels.pdf", 
-                  width = 15, height=14)
+ph_all$gtable$grobs[[3]] <- gTree(children=gList(rect1, rect2, rect3))
+
+show(ph_all)
+
+save_pheatmap_pdf(ph_all, "figure-3-heatmap-all-withoutlabels-main.pdf", 
+                  width = 11, height=10)
 
 ```
 
