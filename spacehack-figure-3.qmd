@@ -1,5 +1,5 @@
 ---
-title: "Code for Figure 3"
+title: "Code for Figure 3 + Supp Figs"
 format: 
     html:
       toc: true
@@ -118,9 +118,12 @@ ggplot(cd %>% as.data.frame,
 
 
 
-base_clusterings <- read_tsv(file.path(datadir, 
+base_clusterings <- read_tsv(file.path(datadir, "libd_dlpfc/Br8100_151673",
                                        "combined_methods.tsv"),
                              show_col_types = FALSE)
+# base_clusterings <- read_tsv(file.path(datadir, 
+#                                        "combined_methods.tsv"),
+#                              show_col_types = FALSE)
 colnames(base_clusterings)[1] <- "barcode_id"
 
 mean(cd$barcode_id %in% base_clusterings$barcode_id)
@@ -142,7 +145,7 @@ cns <- grep("_label$", colnames(base_clusterings),
             value = TRUE)
 ss <- strsplit(cns, "_")
 sapply(ss, length) %>% table
-keep <- sapply(ss, function(u) u[length(u)-1]) %in% c(5,7,9)
+keep <- sapply(ss, function(u) u[length(u)-1]) %in% nclust_range
 base_clusterings <- base_clusterings[,c("barcode_id",cns[keep])]
 
 dim(base_clusterings)
@@ -277,13 +280,13 @@ all(colnames(aris_all) %in% names(all_mses))
 anno_row <- data.frame(entropy = all_mses)
 rownames(anno_row) <- names(all_mses)
 
-anno_row$n_clust <- real_n[rownames(anno_row)]
+anno_row$n_clust <- as.factor(real_n[rownames(anno_row)])
 
-anno_row$annotation <- "no"
-anno_row$annotation[rownames(anno_row)=="annotation"] <- "yes"
+anno_row$panelA <- "not-shown"
+anno_row$panelA[rownames(anno_row)=="annotation"] <- "annotation"
 
 ann_colors = list(
-    annotation = c("no" = "white", "yes" = "black"),
+    panelA = c("not-shown" = "grey", "shown" = "#1B9E77", "annotation" = "black"),
     n_clust = c("5" = "#1B9E77", "7" = "orange", "9" = "firebrick")
 )
 
@@ -296,20 +299,22 @@ calc_summary(ph_all$tree_row, aris_all, 2, "annotation")
 
 anno_row$clust <- clust[rownames(anno_row)]
 
-show_these <- anno_row %>% filter(real_n==7, clust==2) %>% 
+show_these <- anno_row %>% filter(real_n==7) %>% 
   arrange(entropy) %>%
   rownames_to_column("method") %>%
-  filter(method != "annotation") %>% head(5) %>% pull(method)
+  filter(method != "annotation") 
 
-show_this <- anno_row %>% filter(real_n==7, clust==1) %>% 
-  arrange(desc(entropy)) %>%
-  rownames_to_column("method") %>%
-  filter(method != "annotation") %>% head(1) %>% pull(method)
+qs <- quantile(1:nrow(show_these), p=(0:3)/3) %>% as.integer()
 
-(show_set <- c(show_these, "annotation", show_this))
+show_these <- show_these %>% slice(qs) %>% pull(method)
 
-anno_row$shown <- 0
-anno_row$shown[rownames(anno_row) %in% show_set] <- 1
+# show_this <- anno_row %>% filter(real_n==7, clust==1) %>% 
+#   arrange(desc(entropy)) %>%
+#   rownames_to_column("method") %>%
+#   filter(method != "annotation") %>% head(1) %>% pull(method)
+# (show_set <- c(show_these, "annotation"))
+
+anno_row$panelA[rownames(anno_row) %in% show_these] <- "shown"
 
 # making the heatmap was here; moved below
 
@@ -608,6 +613,42 @@ save_pheatmap_pdf(ph_all, "figure-3-heatmap-all-withoutlabels-main.pdf",
 
 ```
 
+
+## Read in clusterings from all LIBD slices and plot heatmaps
+
+```{r}
+
+fs <- dir(pattern = "combined_methods.tsv", 
+          path = file.path(datadir, "libd_dlpfc"),
+          recursive = TRUE, full.names = TRUE)
+
+ss <- strsplit(fs, "/")
+names(fs) <- sapply(ss, .subset, 4)
+
+
+tsvs <- lapply(fs, function(u) {
+ d <- read_tsv(u, show_col_types = FALSE)
+ colnames(d)[1] <- "barcode_id"
+ d %>% column_to_rownames("barcode_id")
+})
+
+
+pdf("SuppFig-DPLFC-ARI-heatmaps-all-slices.pdf", height = 10, width = 10)
+
+for(i in 1:length(tsvs)) {
+  real_n <- apply(tsvs[[i]], 2, 
+                  function(u) length(unique(u)))
+  aris_all <- calc_aris(tsvs[[i]][real_n %in% c(5,7,9)])
+  ph_all <- pheatmap(aris_all, fontsize = 6, main = names(tsvs)[i])
+  # grid::grid.newpage()
+  # grid::grid.draw(ph_all$gtable)
+  cat(names(tsvs)[i],"\n")
+}
+
+dev.off()
+
+
+```
 
 
 ## sessionInfo()
