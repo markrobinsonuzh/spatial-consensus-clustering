@@ -286,7 +286,7 @@ anno_row$panelA <- "not-shown"
 anno_row$panelA[rownames(anno_row)=="annotation"] <- "annotation"
 
 ann_colors = list(
-    panelA = c("not-shown" = "grey", "shown" = "#1B9E77", "annotation" = "black"),
+    panelA = c("not-shown" = "grey95", "shown" = "blue", "annotation" = "black"),
     n_clust = c("5" = "#1B9E77", "7" = "orange", "9" = "firebrick")
 )
 
@@ -312,7 +312,6 @@ show_these <- show_these %>% slice(qs) %>% pull(method)
 #   arrange(desc(entropy)) %>%
 #   rownames_to_column("method") %>%
 #   filter(method != "annotation") %>% head(1) %>% pull(method)
-# (show_set <- c(show_these, "annotation"))
 
 anno_row$panelA[rownames(anno_row) %in% show_these] <- "shown"
 
@@ -484,17 +483,16 @@ ggsave("figure-3-aris-L1O-anno.pdf", p, height = 5, width = 6)
 ```
 
 
-## Making the 8 domains map
+## Making the 6 domains map
 
 ```{r}
 
-(show_set <- c(show_these, "annotation", show_this))
-
+(show_set <- c(show_these, "annotation"))
 
 use_these <- anno_row %>% filter(real_n==7, clust==2) %>% 
   arrange(entropy) %>%
   rownames_to_column("method") %>%
-  filter(method != "annotation") %>% head(8) %>% pull(method)
+  filter(method != "annotation") %>% head(12) %>% pull(method)
 
 all(rownames(coords)==rownames(cd))
 all(rownames(coords)==rownames(these_clusterings))
@@ -524,18 +522,20 @@ df[,show_set] <- df[,show_set] %>%
 
 # nclust <- 7
 # palette <- distinctColorPalette(nclust)
-plots <- vector("list", 8)
+plots <- vector("list", 6)
 count <- 0
 
+borders <- rep("blue", length(show_set)) %>% setNames(show_set)
+borders["annotation"] <- "black"
+borders["consensus_lca"] <- "white"
 
-  
 for(meth in show_set) {
   
   df$this_base <- as.factor(df[[meth]])
   n_palette <- length(levels(df$this_base))
   names(palette)[seq_len(n_palette)] <- levels(df$this_base)
   aa <- ggplot(df, aes(x=row, y=col, colour=this_base)) + 
-    geom_point(size = .5) +
+    geom_point(size = .7) +
     theme_void() +
     theme(legend.position = "none") +
     xlab("") + ylab("") +
@@ -546,15 +546,16 @@ for(meth in show_set) {
     coord_fixed() +
     scale_y_reverse(expand = expansion(0,1)) +
     theme(plot.margin = unit(c(0, 0, 0, 0), "cm"),
-          plot.title = element_text(size = 10))
+          plot.title = element_text(size = 10),
+          panel.border = element_rect(colour = borders[meth], fill=NA, linewidth=2))
   count <- count+1
   plots[[count]] <- aa
   
   
 }
 
-ggsave("figure-3-8methods-exemplary.pdf",
-       plot_grid(plotlist = plots, nrow=4), height = 9, width = 4.5)
+ggsave("figure-3-6methods-exemplary.pdf",
+       plot_grid(plotlist = plots, nrow=3), height = 7.5, width = 4.5)
 
 
 ```
@@ -564,45 +565,50 @@ ggsave("figure-3-8methods-exemplary.pdf",
 ## Making the heatmaps here
 
 ```{r}
-ph_all <- pheatmap(aris_all, fontsize = 5, 
-                   annotation_row = anno_row, 
-                   show_rownames = FALSE,
-                   show_colnames = FALSE,
-                   annotation_colors = ann_colors)
+# ph_all <- pheatmap(aris_all, fontsize = 5, 
+#                    annotation_row = anno_row, 
+#                    show_rownames = FALSE,
+#                    show_colnames = FALSE,
+#                    annotation_colors = ann_colors)
+# 
+# 
+# 
+# save_pheatmap_pdf(ph_all, "figure-3-heatmap-all-withlabels-supplement.pdf", 
+#                   width = 9, height=8)
 
-
-
-save_pheatmap_pdf(ph_all, "figure-3-heatmap-all-withlabels-supplement.pdf", 
-                  width = 9, height=8)
+colnames(aris_all)[anno_row$panelA=="not-shown"] <- ""
 
 ph_all <- pheatmap(aris_all, fontsize = 8,
                    treeheight_row = 15,
                    treeheight_col = 15,
                    show_rownames = FALSE,
-                   show_colnames = FALSE,
+                   show_colnames = TRUE,
+                   angle_col = 45,
                    annotation_row = anno_row %>% mutate(SE = entropy) %>% 
-                     dplyr::select(-clust, -meth, -entropy, -annotation), 
-                     #dplyr::select(-meth, -entropy, -annotation), 
-                   annotation_col = anno_row %>% dplyr::select(annotation), 
+                     dplyr::select(-clust, -meth, -entropy), 
+                     #dplyr::select(-meth, -entropy), 
+                   #annotation_col = anno_row %>% dplyr::select(annotation), 
                    annotation_colors = ann_colors,
                    cutree_rows = 4, cutree_cols = 4)
+
+
 
 # https://stackoverflow.com/questions/78248771/how-to-use-pheatmap-in-r-to-draw-a-box-outside-a-pheatmap-plot-and-save-them-tog
 # (65+1)/(117+3)
 library(grid)
 rect1 <- ph_all$gtable$grobs[[3]]$children[[1]]
 rect2 <- grid::rectGrob(x = unit(0,"npc"), 
-                        y = unit(1-(65+1)/(117+3),"npc"),
-                        width = unit((65+1)/(117+3), "npc"), 
-                        height = unit((65+1)/(117+3), "npc"),
+                        y = unit(1-(67+1)/(120+3),"npc"),
+                        width = unit((67+1)/(120+3), "npc"), 
+                        height = unit((67+1)/(120+3), "npc"),
                         just=c("left", "bottom"),
                         gp=gpar(col="darkgreen", fill="transparent", lex=3))
-rect3 <- grid::rectGrob(x = unit(0,"npc"), 
-                        y = unit(1-(50)/(117+3),"npc"),
-                        width = unit((50)/(117+3), "npc"), 
-                        height = unit((50)/(117+3), "npc"),
+rect3 <- grid::rectGrob(x = unit(13/(120+3),"npc"), 
+                        y = unit(((120+3)-68)/(120+3),"npc"),
+                        width = unit((55)/(120+3), "npc"), 
+                        height = unit((55)/(120+3), "npc"),
                         just=c("left", "bottom"),
-                        gp=gpar(col="blue", fill="transparent", lex=3))
+                        gp=gpar(col="salmon", fill="transparent", lex=3))
 
 ph_all$gtable$grobs[[3]] <- gTree(children=gList(rect1, rect2, rect3))
 
