@@ -581,9 +581,10 @@ colnames(aris_all)[anno_row$panelA=="not-shown"] <- ""
 ph_all <- pheatmap(aris_all, fontsize = 8,
                    treeheight_row = 15,
                    treeheight_col = 15,
-                   show_rownames = FALSE,
-                   show_colnames = TRUE,
+                   show_rownames = TRUE,
+                   show_colnames = FALSE,
                    angle_col = 45,
+                   labels_row = colnames(aris_all),
                    annotation_row = anno_row %>% mutate(SE = entropy) %>% 
                      dplyr::select(-clust, -meth, -entropy), 
                      #dplyr::select(-meth, -entropy), 
@@ -644,8 +645,8 @@ pdf("SuppFig-DPLFC-ARI-heatmaps-all-slices.pdf", height = 10, width = 10)
 for(i in 1:length(tsvs)) {
   real_n <- apply(tsvs[[i]], 2, 
                   function(u) length(unique(u)))
-  aris_all <- calc_aris(tsvs[[i]][real_n %in% c(5,7,9)])
-  ph_all <- pheatmap(aris_all, fontsize = 6, main = names(tsvs)[i])
+  aris_this <- calc_aris(tsvs[[i]][real_n %in% c(5,7,9)])
+  ph_this <- pheatmap(aris_this, fontsize = 6, main = names(tsvs)[i])
   # grid::grid.newpage()
   # grid::grid.draw(ph_all$gtable)
   cat(names(tsvs)[i],"\n")
