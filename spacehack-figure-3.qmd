@@ -370,7 +370,7 @@ for(nmethod in nmethod_range) {
                             collapse="\n")
 
     ace_q <- ggplot(coords, aes(row,col,colour=ent)) +
-      geom_point(size = 1) +
+      geom_point(size = 1.8) +
       scale_colour_gradient(low="gray90", high="deeppink4") +
       theme_void() +
       theme(legend.position = "bottom") +
@@ -379,7 +379,7 @@ for(nmethod in nmethod_range) {
       coord_fixed() +
       labs(title = this_title) +
       #      subtitle = this_subtitle)
-      theme(plot.subtitle=element_text(size=6))
+      # theme(plot.title=element_text(size=8))
       
       cat(this_title, "\n")
       cat(this_subtitle, "\n")
