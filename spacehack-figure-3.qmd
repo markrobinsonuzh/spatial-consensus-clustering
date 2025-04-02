@@ -363,6 +363,12 @@ for(nmethod in nmethod_range) {
     
     cents[as.character(nmethod), as.character(nclust)] <- mean(coords$ent)
     
+    this_title <- paste0("CME (", nclust, " clusters, ",
+                         nmethod, " methods)")
+    this_subtitle <- paste0(strwrap(paste0(rownames(short_list),
+                                           collapse = " "), width=70),
+                            collapse="\n")
+
     ace_q <- ggplot(coords, aes(row,col,colour=ent)) +
       geom_point(size = 1) +
       scale_colour_gradient(low="gray90", high="deeppink4") +
@@ -371,13 +377,13 @@ for(nmethod in nmethod_range) {
       scale_x_continuous(expand = expansion(0,1)) +
       scale_y_reverse(expand = expansion(0,1)) +
       coord_fixed() +
-      labs(title = paste0("CME (", 
-                          nclust, " clusters, ",
-                          nmethod, " methods)"),
-           subtitle = paste0(strwrap(paste0(rownames(short_list), 
-                                            collapse = " "), width=70),
-                             collapse="\n")) +
+      labs(title = this_title) +
+      #      subtitle = this_subtitle)
       theme(plot.subtitle=element_text(size=6))
+      
+      cat(this_title, "\n")
+      cat(this_subtitle, "\n")
+      cat("----\n")
     show(ace_q)
     q[[count]] <- ace_q
     count <- count + 1
@@ -392,11 +398,17 @@ ggsave(filename = paste0("figure-3-across-clusterings-entropy.pdf"),
        plot = marrangeGrob(q, nrow=1, ncol=3),
        width = 10, height = 4)
 
+ggsave(filename = paste0("figure-3D-12methods-7clusters.pdf"),
+       plot = q[[23]],
+       width = 5, height = 5)
+
+
+
 ph_cents <- pheatmap(cents, cluster_rows = FALSE, 
          cluster_cols = FALSE, 
          color = colorRampPalette(c("gray90","deeppink4"))(30))
 
-save_pheatmap_pdf(ph_cents, "figure-3-heatmap-across-entropy.pdf", 
+save_pheatmap_pdf(ph_cents, "figure-3E-heatmap-across-entropy.pdf", 
                   width = 3, height=5)
 
 ```
@@ -474,10 +486,18 @@ p <- ggplot(aris, aes(x = ARI_annotation, y = ARI_L1O_consensus,
   geom_point(size = 3) +
   scale_colour_manual(values = ann_colors$n_clust) +
   stat_cor(size = 5) +
-  xlab("ARI: annotation") + ylab("ARI: leave one out")
+  xlab("ARI: annotation") + ylab("ARI: leave one out") +
+  theme_classic()
+  #theme(legend.position.inside = c(0.7, 0.7))
 
+pp <- p + guides(colour = guide_legend(position = "inside", )) +
+  theme(legend.position.inside = c(.9, .8),
+        legend.box.background = element_rect(colour = "black", 
+                                             linewidth = 1)) +
+  labs(colour = "number of\nclusters")
+#"number of clusters"))
 
-ggsave("figure-3-aris-L1O-anno.pdf", p, height = 5, width = 6)
+ggsave("figure-3C-aris-L1O-anno.pdf", pp, height = 4.5, width = 5)
 
 
 ```
@@ -529,6 +549,15 @@ borders <- rep("blue", length(show_set)) %>% setNames(show_set)
 borders["annotation"] <- "black"
 borders["consensus_lca"] <- "white"
 
+
+titles <- show_set %>% setNames(show_set)
+titles["BANKSY_starmap_7"] <- paste0("5. ", titles["BANKSY_starmap_7"]) 
+titles["SOTIP_Visium_dlpfc_7"] <- paste0("2. ", titles["SOTIP_Visium_dlpfc_7"]) 
+titles["precast_default_7"] <- paste0("3. ", titles["precast_default_7"]) 
+titles["meringue_mob_7"] <- paste0("4. ", titles["meringue_mob_7"]) 
+titles["annotation"] <- paste0("1. ", titles["annotation"]) 
+titles[" "] <- " "
+
 for(meth in show_set) {
   
   df$this_base <- as.factor(df[[meth]])
@@ -542,11 +571,11 @@ for(meth in show_set) {
     scale_colour_manual(values = palette) +
     scale_x_continuous(expand = expansion(0,1)) +
     # scale_y_continuous(expand = expansion(0,1)) +
-    ggtitle(paste0(meth, " SE=", round(all_mses[meth], 3))) +
+    ggtitle(paste0(titles[meth], " SE=", round(all_mses[meth], 3))) +
     coord_fixed() +
     scale_y_reverse(expand = expansion(0,1)) +
     theme(plot.margin = unit(c(0, 0, 0, 0), "cm"),
-          plot.title = element_text(size = 10),
+          plot.title = element_text(size = 9.5),
           panel.border = element_rect(colour = borders[meth], fill=NA, linewidth=2))
   count <- count+1
   plots[[count]] <- aa
@@ -554,7 +583,7 @@ for(meth in show_set) {
   
 }
 
-ggsave("figure-3-6methods-exemplary.pdf",
+ggsave("figure-3A-6methods-exemplary.pdf",
        plot_grid(plotlist = plots, nrow=3), height = 7.5, width = 4.5)
 
 
@@ -576,15 +605,26 @@ ggsave("figure-3-6methods-exemplary.pdf",
 # save_pheatmap_pdf(ph_all, "figure-3-heatmap-all-withlabels-supplement.pdf", 
 #                   width = 9, height=8)
 
-colnames(aris_all)[anno_row$panelA=="not-shown"] <- ""
+colnames(aris_all)[anno_row$panelA=="not-shown"] <- " "
+
+ann_colors$SE <- colorRampPalette(RColorBrewer::brewer.pal(n = 7,
+                                name = "Purples"))(4)
+
+
+greens <- colorRampPalette(RColorBrewer::brewer.pal(n = 7,
+                                name = "Greens"))(100)
+
+titles_chop <- titles
+titles_chop[grepl("^[0-9]", titles)] <- substr(titles[grepl("^[0-9]", titles)], 1, 2)
 
 ph_all <- pheatmap(aris_all, fontsize = 8,
                    treeheight_row = 15,
                    treeheight_col = 15,
                    show_rownames = TRUE,
                    show_colnames = FALSE,
+                   color = greens,
                    angle_col = 45,
-                   labels_row = colnames(aris_all),
+                   labels_row = titles_chop[colnames(aris_all)],
                    annotation_row = anno_row %>% mutate(SE = entropy) %>% 
                      dplyr::select(-clust, -meth, -entropy), 
                      #dplyr::select(-meth, -entropy), 
@@ -603,20 +643,20 @@ rect2 <- grid::rectGrob(x = unit(0,"npc"),
                         width = unit((67+1)/(120+3), "npc"), 
                         height = unit((67+1)/(120+3), "npc"),
                         just=c("left", "bottom"),
-                        gp=gpar(col="darkgreen", fill="transparent", lex=3))
+                        gp=gpar(col="blue", fill="transparent", lex=3))
 rect3 <- grid::rectGrob(x = unit(13/(120+3),"npc"), 
                         y = unit(((120+3)-68)/(120+3),"npc"),
                         width = unit((55)/(120+3), "npc"), 
                         height = unit((55)/(120+3), "npc"),
                         just=c("left", "bottom"),
-                        gp=gpar(col="salmon", fill="transparent", lex=3))
+                        gp=gpar(col="salmon", fill="transparent", lex=3, lty=3))
 
 ph_all$gtable$grobs[[3]] <- gTree(children=gList(rect1, rect2, rect3))
 
 show(ph_all)
 
-save_pheatmap_pdf(ph_all, "figure-3-heatmap-all-withoutlabels-main.pdf", 
-                  width = 11, height=10)
+save_pheatmap_pdf(ph_all, "figure-3B-heatmap-all-withoutlabels-main.pdf", 
+                  width = 8, height=7)
 
 ```
 
