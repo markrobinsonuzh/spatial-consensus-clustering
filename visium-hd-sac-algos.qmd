@@ -1,0 +1,153 @@
+---
+title: "Base clustering exploration"
+format: 
+    html:
+      toc: true
+      self-contained: true
+      highlight-style: github
+      code-line-numbers: true
+      code-fold: true
+editor: source
+editor_options: 
+  chunk_output_type: console
+---
+
+## Retrieve parameters
+
+```{r display-params}
+
+# for testing
+datadir <- "data/visium_hd_cancer_colon_neo"
+k <- 6
+nclust_range <- c(16,20,24)
+
+# if datadir ends in `/`, it might screw up the parsing of method names,
+# so add a check for it
+stopifnot(tail(strsplit(datadir,"")[[1]],1)!="/")
+
+```
+
+## Packages / functions
+
+```{r load-packages}
+suppressPackageStartupMessages({
+  library(SpatialExperiment)
+  library(dplyr)
+  library(ggplot2)
+  library(cowplot)
+  library(clue)
+  library(khroma)
+  library(scran)
+  library(limma)
+  library(tibble)
+  library(readr)
+  library(ggrepel)
+  library(mclust)
+  library(pheatmap)
+  library(fastDummies)
+  library(randomcoloR)
+  library(reshape2)
+  #library(poem)
+  library(gridExtra)
+  library(tidyr)
+})
+source("utils.R")
+```
+
+
+## Load data
+
+```{r load-data}
+
+f <- file.path(datadir, "labels.tsv") %>% setNames("annotation")
+
+fs <- dir(datadir, 
+          pattern = "domains.tsv", 
+          recursive = TRUE,
+          full.names = TRUE)
+
+names(fs) <- sapply(strsplit(fs, "/"), .subset, 3)
+
+
+# fs <- c(fs, f)
+
+tabs <- mapply(function(u, v) {
+  # read_tsv(u, col_names = c("id","cluster"),
+  #          show_col_types = FALSE, skip = 1,
+  #          col_types = cols(id = col_character(),
+  #                           cluster = col_character(),
+  #                           method = col_character())) %>%
+  read_tsv(u, col_names = c("id","cluster"),
+           show_col_types = FALSE, skip = 1) %>%
+    mutate(method = v) 
+}, fs, names(fs), SIMPLIFY = FALSE) %>% bind_rows()
+
+
+pw <- pivot_wider(tabs, names_from = method, 
+                  values_from = cluster)
+
+pw <- pw[,colMeans(is.na(pw))<.1]
+
+# removing ~900 spots 
+
+rs <- rowSums(is.na(pw))
+table(rs)
+
+pw <- pw[rs==0,]
+
+dim(pw)
+
+
+real_n <- apply(pw[,-1], 2, 
+                function(u) length(unique(u)))
+table(real_n)
+
+
+
+
+
+```
+
+
+## Similarity of all clusterings
+
+```{r clustering-similarities, fig.height=9, fig.width=10}
+
+
+greens <- colorRampPalette(RColorBrewer::brewer.pal(n = 7,
+                                name = "Greens"))(100)
+
+# keepers <- names(bases)
+aris_all <- calc_aris(pw[,-1] %>% as.data.frame)
+ph_all <- pheatmap(aris_all, fontsize = 12, color = greens)
+
+# https://stackoverflow.com/questions/78248771/how-to-use-pheatmap-in-r-to-draw-a-box-outside-a-pheatmap-plot-and-save-them-tog
+# (65+1)/(117+3)
+library(grid)
+rect1 <- ph_all$gtable$grobs[[3]]$children[[1]]
+rect2 <- grid::rectGrob(x = unit(5/12,"npc"), 
+                        y = unit(0/12,"npc"),
+                        width = unit(7/12, "npc"), 
+                        height = unit(7/12, "npc"),
+                        just=c("left", "bottom"),
+                        gp=gpar(col="black", fill="transparent", lex=3))
+
+ph_all$gtable$grobs[[3]] <- gTree(children=gList(rect1, rect2))
+
+show(ph_all)
+
+save_pheatmap_pdf(ph_all, "figure-5E-heatmap.pdf", 
+                  width = 6.5, height=6)
+
+
+# save_pheatmap_pdf(ph_all, paste0(fn_stub, "_02_heatmap-all.pdf")
+                  
+```
+
+
+## sessionInfo()
+
+```{r sessioninfo}
+sessionInfo()
+```
+
