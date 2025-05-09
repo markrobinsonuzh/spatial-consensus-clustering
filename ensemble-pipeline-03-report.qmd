@@ -1,0 +1,395 @@
+---
+title: |
+  Consensus clustering report \
+  slice: `r basename(params$datadir)` \
+  number-of-clusters: `r params$nclust` \
+  number-of-methods: `r params$nmethod`
+format: 
+    html:
+      toc: true
+      self-contained: true
+      highlight-style: github
+      code-line-numbers: true
+      code-fold: true
+editor: source
+editor_options: 
+  chunk_output_type: console
+params:
+  datadir: 'test'
+  nmethod: 5
+  ground_truth:
+    - x
+    - y
+  nns: 6
+  name: "noname"
+  nclust: 16
+  pt_size: 0.5
+  consensus_methods: null
+  spot_agreement: true
+---
+
+## Retrieve parameters
+
+```{r display-params}
+params
+name <- params$name
+datadir <- params$datadir
+gt <- params$ground_truth
+nclust <- params$nclust
+nmethod <- params$nmethod
+k <- params$nns
+pt_size <- params$pt_size
+m_con <- params$consensus_methods
+spot_agreement <- params$spot_agreement
+
+# # for testing
+# name <- "thalamus-6800"
+# datadir <- "data/C57BL6J-638850_6800"
+# gt <- c("parcellation_structure","parcellation_substructure")
+# nclust <- 17
+# nmethod <- 5
+# k <- 6
+
+```
+
+## Packages / functions
+
+```{r load-packages, eval=TRUE}
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(ggplot2)
+  library(cowplot)
+  library(clue)
+  library(khroma)
+  library(scran)
+  library(limma)
+  library(tibble)
+  library(readr)
+  library(ggrepel)
+  library(mclust)
+  library(pheatmap)
+  library(fastDummies)
+  library(randomcoloR)
+  library(reshape2)
+  library(poem)
+  library(gridExtra)
+})
+source("utils.R")
+```
+
+
+## Load data
+
+```{r load-data, eval=TRUE}
+fn_stub <- paste0(name, "_nclust-", nclust, "_nmeth-", nmethod)
+
+df <- read.delim(file.path(datadir, paste0("df_consensus_", name, "_", nmethod, ".tsv")), stringsAsFactors = FALSE, row.names=1,
+                 colClasses=c("character", rep(NA, ncol(read.delim(file.path(datadir, paste0("df_consensus_", name, "_", nmethod, ".tsv")), header=TRUE))-1)))
+weights <- read.delim(file.path(datadir, paste0("weights_consensus_", name, "_nmeth_", nmethod, "_nclust_", nclust, ".tsv")), stringsAsFactors = FALSE, row.names=1)
+consensus_names <- paste0("consensus_", m_con, "_", nclust)
+
+# Modify the "-" in SCAN-IT, will lead to later issue
+colnames(df) <- gsub("-", "", colnames(df))
+rownames(weights) <- gsub("-", "", weights$instance)
+
+# Cluster of interest
+coi <- df[,c( "row", "col", weights$instance, consensus_names, gt)]
+
+# Align the dataset in advance
+lengths <- apply(coi[,3:ncol(coi)], 2, function(x) length(unique(x)))
+if (all(lengths[c(weights$instance, consensus_names)]==lengths[consensus_names[1]])){
+  coi <- align_classes(coi, 
+                       ref=consensus_names[1], 
+                       columns=c(weights$instance, consensus_names))
+}
+
+# print the weight columns for base-clusters
+cat("Weights for base cluster instances used.. \n")
+knitr::kable(t(weights))
+```
+
+
+
+## Consensus clusterings 
+
+Here we plot the consensus clusterings side-by-side with the ground truth. All three consensus clusterings use the same base-clusterings. And the spot-level entropy is calculated using the same base-clusterings plus the individual consensus clusterings.
+
+```{r get consensus cross-method entropy and spot-agreement}
+# Get the cross-method entropy in each consensus case (consensus+base clusterings)
+for (con in consensus_names){
+  # Get only the base clusterings and the target consensus
+  these_clusterings <- coi[, c(weights$instance, con)] %>% 
+                       align_classes(con)
+
+  # Extracting the clustering level. Need to share the same label as the rest
+  lv <- levels(these_clusterings[[con]])
+  # For each row(spot) in these_clusterings, return how many times each clustering label is returned 
+  ps <- apply(these_clusterings, 1, function(u) table(factor(u, levels=lv))) %>% t
+
+  # calculating row-wise entropy (cross different methods)
+  coi[[sprintf("ent_%s", con)]] <- apply(ps, 1, calc_entropy)
+
+  # Check spot agreements with the first gt
+  if (spot_agreement){
+    sem <- getSpatialExternalMetrics(true = as.factor(coi[[gt[1]]]),
+                                    pred = as.factor(coi[[con]]),
+                                    location = coi[,c("row","col")],
+                                    metrics = "SpatialSPC",
+                                    level = "element", k = k,
+                                    useNegatives = FALSE)
+    coi[[sprintf("sg_%s", con)]] <- sem$SpatialSPC
+  }
+}
+
+these_clusterings <- coi[, weights$instance] %>% align_classes(weights$instance[1])
+lv <- levels(these_clusterings[[weights$instance[1]]])
+ps <- apply(these_clusterings, 1, function(u) table(factor(u, levels=lv))) %>% t
+coi$ent_bc <- apply(ps, 1, calc_entropy)
+
+# Plot a heatmap showing the cluster size distribution
+cluster_sizes <- apply(coi[, consensus_names], 2, table) 
+ph_size <- pheatmap(cluster_sizes, 
+         cluster_rows = FALSE, 
+         cluster_cols = FALSE, 
+         display_number = TRUE,
+         color = colorRampPalette(c("gray90","deeppink4"))(30),
+         angle_col = 45,
+         main = "Consensus cluster size")
+
+show(ph_size)
+```
+
+```{r plot consensus entropy, fig.width=8, fig.height=17, eval=TRUE}
+palette <- distinctColorPalette(max(lengths))
+
+if (unlist(strsplit(name, "-", fixed=TRUE))[1]=="libd_dlpfc" && nclust==7){
+  coi <- align_classes(coi, ref=gt, columns=c(weights$instance, consensus_names))
+  
+  # For DLPFC example, using the original DLPFC palette
+  #              L3,        L1,        WM,        L5,         L6,        L2,        L4
+  palette <- c("#4DAF4A", "#F0027F", "#1A1A1A", "#FFD700", "#FF7F00", "#377EB8", "#984EA3")
+}
+
+
+# Plot the spot-wise entropy
+con_p <- lapply(consensus_names, function(con){
+  this_palette <- palette[1:length(unique(coi[[con]]))] %>% setNames(unique(coi[[con]]))
+  con_p <- ggplot(coi, aes(row, col, colour=as.factor(.data[[con]]))) + 
+    geom_point(size = pt_size) +
+    theme_classic() +
+    theme(legend.position = "none", 
+        axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank()) +
+    # xlab("") + ylab("") +
+    scale_colour_manual(values = this_palette) +
+    scale_x_continuous(expand = expansion(0,1)) +
+    scale_y_continuous(expand = expansion(0,1)) +
+    ggtitle("consensus") + coord_fixed()
+  return(con_p)
+})
+
+# ggsave("libd_con.pdf", con_p, height=4, width=2.7)
+
+# Entropy plot
+ent_p <- lapply(paste0("ent_", c(consensus_names, "bc")), function(ent){
+
+  ace_q <- ggplot(coi, aes(row, col, colour=.data[[ent]])) +
+    geom_point(size = pt_size-0.2) +
+    scale_colour_gradient(low="gray90", high="deeppink4") +
+    theme_classic() +
+    theme(legend.position = "bottom", 
+        axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank()) +
+    scale_x_continuous(expand = expansion(0,1)) +
+    scale_y_continuous(expand = expansion(0,1)) +
+    coord_fixed() +
+    labs(title = sprintf("entropy_%s", gsub("ent_consensus_", "", ent)), 
+        subtitle = sprintf("mean entropy: %.4f", mean(coi[[ent]])), 
+        colour = "entropy") +
+    theme(plot.subtitle=element_text(size=8))
+  return(ace_q)
+})
+
+# Ground truth label plots
+gt_p <- lapply(gt, function(gt_lab){
+  this_palette <- palette[1:length(unique(coi[[gt_lab]]))] %>% setNames(unique(coi[[gt_lab]]))
+  gt_p <- ggplot(coi, aes(row, col, colour=as.factor(.data[[gt_lab]]))) + 
+    geom_point(size = pt_size) +
+    theme_classic() +
+    theme(legend.position = "right", 
+        axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank()) +
+    xlab("") + ylab("") +
+    labs(color='"GT"') +
+    scale_colour_manual(values = this_palette) +
+    scale_x_continuous(expand = expansion(0,1)) +
+    scale_y_continuous(expand = expansion(0,1)) +
+    ggtitle(gt_lab) + coord_fixed()
+  
+  return(gt_p)
+})
+
+# Render the plot by 2x4 in QMD file
+grid.arrange(grobs = c(rbind(con_p, ent_p), gt_p), ncol=2)
+
+#ggsave("libd_label.pdf", gt_p, height=4, width=3.5)
+```
+
+Simliarly, for spot-agreement..
+
+```{r spot-agreement, fig.width=8, fig.height=17, eval=TRUE}
+# Plot spot agreement in similar logic
+if (spot_agreement){
+  sg_p <- lapply(paste0("sg_", consensus_names), function(sg){
+
+    sg_plot <- ggplot(coi, aes(row, col, colour=.data[[sg]])) +
+      geom_point(size = pt_size) +
+      scale_colour_gradient(low="gray90", high="deeppink4") +
+      theme_classic() +
+      theme(legend.position = "bottom") +
+      scale_x_continuous(expand = expansion(0,1)) +
+      scale_y_continuous(expand = expansion(0,1)) +
+      coord_fixed() +
+      labs(title = sprintf("spot_agreement_%s", gsub("sg_consensus_", "", sg)),
+          subtitle = sprintf("mean agreement: %.4f", mean(coi[[sg]])),
+          colour = "agreement") +
+      theme(plot.subtitle=element_text(size=8))
+
+    return(sg_plot)
+  })
+
+  grid.arrange(grobs = c(rbind(con_p, sg_p), gt_p), ncol=2)
+}
+```
+
+## Base clusterings
+
+First, let's take a look which base plots are more heavily weighted in the weighted cluster approach.
+
+```{r plot weight bar first, fig.width=6, fig.height=6, eval=TRUE}
+y_lab <- ifelse("weighted" %in% m_con, "Weights for weighted consensus", "ARI against LCA consensus")
+
+weight_bar <- ggplot(weights, aes(x=factor(.data$instance, levels=.data$instance), y=weights)) +
+              geom_bar(stat="identity") + 
+              geom_text(aes(label=round(.data$weights, digit=3)), 
+                        position = position_dodge(width=0.8), vjust=-.1, hjust=-.1, angle=45)+
+              theme_minimal() + 
+              scale_y_continuous(expand = expansion(mult=c(0,0.2))) +
+              theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+              xlab("Base clusterings") +
+              ylab(y_lab) 
+
+weight_bar
+```
+
+
+Then we plot the results for individual weights used. 
+
+```{r base-clusterings, fig.width=14, fig.height=7, eval=TRUE}
+# using 8 clusters as an example... in total 11 plots
+bc_p <- lapply(c(weights$instance), function(col_p){
+  this_palette <- palette[1:length(unique(coi[[col_p]]))] %>% setNames(unique(coi[[col_p]]))
+  title_text <-  sub("_.*", "", col_p)
+
+  base_p <- ggplot(coi, aes(row, col, colour=as.factor(.data[[col_p]]))) + 
+    geom_point(size = pt_size) +
+    theme_classic() +
+    theme(legend.position = "none", 
+        axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank()) +
+    xlab("") + ylab("") +
+    scale_colour_manual(values = this_palette) +
+    scale_x_continuous(expand = expansion(0,1)) +
+    scale_y_continuous(expand = expansion(0,1)) +
+    ggtitle(title_text) +
+      #paste(col_p, round(weights[col_p, "weights"], 3), sep="-")) 
+    coord_fixed()
+
+  return(base_p)
+})
+
+grid.arrange(grobs = bc_p, ncol=4)
+
+grid.arrange(grobs = c(con_p, gt_p), ncol=3)
+```
+
+
+## Pair-wise ARI
+
+Here we plot the cross-method ARI heatmap for consensus vs base-clusterings used.
+
+```{r calculate and plot the ARI results, fig.height=8, fig.width=8, eval=TRUE}
+# keepers <- names(bases)
+aris_all <- calc_aris(coi[,c(as.character(weights$instance), gt)])
+aris_all <- aris_all - diag(nrow = nrow(aris_all))
+ph_all <- pheatmap(aris_all, 
+                   fontsize = 8, 
+                   treeheight_row = 0,
+                   treeheight_col = 20,
+                   main='Cross method ARI', 
+                   labels_row = sub("_.*$", "", rownames(aris_all)),
+                   labels_col = sub("_.*$", "", colnames(aris_all)),
+                   color = viridisLite::viridis(50))
+
+ggsave("ari_libd.pdf", ph_all[[4]], width = 4, height = 4)
+show(ph_all)
+```
+
+
+```{r save everything into a pdf, eval=TRUE}
+if (spot_agreement){
+  # Plot spot agreement in similar logic
+  anti_sg_p <- lapply(paste0("sg_", consensus_names), function(sg){
+
+    sg_plot <- ggplot(coi, aes(row, col, colour=1-.data[[sg]])) +
+      geom_point(size = pt_size) +
+      scale_colour_gradient(low="gray90", high="deeppink4") +
+      theme_classic() +
+      theme(legend.position = "bottom") +
+      scale_x_continuous(expand = expansion(0,1)) +
+      scale_y_continuous(expand = expansion(0,1)) +
+      coord_fixed() +
+      labs(title = sprintf("1-spot_agreement_%s", gsub("sg_consensus_", "", sg)),
+          subtitle = sprintf("compare against %s", gt[1]), 
+          colour = "disagreement") +
+      theme(plot.subtitle=element_text(size=8))
+
+    return(sg_plot)
+  })
+}
+
+pdf(sprintf("report_%s_nclust_%s_nmeth_%s_0412.pdf", name, nclust, nmethod), width=12, height=7)
+grid.arrange(grobs = c(con_p, gt_p[1], ent_p), #gt_p[length(gt_p)]), 
+                      ncol=length(consensus_names)+1, top=sprintf("Cross-method entropy for different consensus methods. Cluster number: %s", nclust))
+if (spot_agreement){
+  grid.arrange(grobs = c(con_p, gt_p[1], sg_p, gt_p[length(gt_p)]), 
+               ncol=length(consensus_names)+1, top=sprintf("Consensus spot-wise agreement compared against %s.", gt[1]))
+  grid.arrange(grobs = c(con_p, gt_p[1], anti_sg_p, gt_p[length(gt_p)]), 
+               ncol=length(consensus_names)+1, top="Consensus spot-wise agreement (inversed) with ground truth labels.")
+}
+grid.arrange(grobs = bc_p, ncol=4, top="Base clusters used by consensus algorithms, ranked by weight")
+grid.arrange(grobs = list(weight_bar, ph_size[[4]], ph_all[[4]]), widths = c(3,3,5), ncol=3, top="consensus performance summary")
+dev.off()
+```
+
+## sessionInfo()
+
+```{r sessionInfo}
+sessionInfo()
+```

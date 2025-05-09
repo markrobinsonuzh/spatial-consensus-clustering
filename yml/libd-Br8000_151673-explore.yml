@@ -1,24 +1,24 @@
-name: libd_dlpfc-Br8100_151674
-datadir: ../../data/libd_dlpfc/Br8100_151674
+name: libd_dlpfc-Br8100_151673
+datadir: ../../data/libd_dlpfc_check/Br8100_151673
 nclust_range: 
   - 7
   - 9
+  - 11
   - 13
+  - 15
   - 17
   - 21
 nmethod_range:
-#  - 3
-#  - 4
+  - 3
+  - 4
   - 5
   - 6
   - 7
   - 8
-  - 9
-  - 10
-  - 11
 ground_truth:
   - label
 nns: 6
 nsmoothest: 30
-spot_agreement: false
 # obs_filter: parcellation_division=="TH" | parcellation_structure=="ZI"
+spot_agreement:
+  - true

@@ -23,4 +23,5 @@ ground_truth:
   - label
 nns: 6
 nsmoothest: 30
+spot_agreement: false
 # obs_filter: parcellation_division=="TH" | parcellation_structure=="ZI"
