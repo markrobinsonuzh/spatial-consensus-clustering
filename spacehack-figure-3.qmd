@@ -586,6 +586,52 @@ for(meth in show_set) {
 ggsave("figure-3A-6methods-exemplary.pdf",
        plot_grid(plotlist = plots, nrow=3), height = 7.5, width = 4.5)
 
+```
+
+## Making the 12 domains supplementary figure
+
+```{r}
+
+df <- cbind(base_clusterings[,setdiff(use_these,"annotation")], 
+            coords, annotation=cd$ground_truth)
+
+palette <- readRDS("libd_color_code.rds")
+
+
+# df[,use_these] <- df[,use_these] %>%
+#   align_classes("annotation")
+
+# nclust <- 7
+# palette <- distinctColorPalette(nclust)
+plots <- vector("list", 12)
+count <- 0
+
+for(meth in use_these) {
+  
+  df$this_base <- as.factor(df[[meth]])
+  n_palette <- length(levels(df$this_base))
+  names(palette)[seq_len(n_palette)] <- levels(df$this_base)
+  aa <- ggplot(df, aes(x=row, y=col, colour=this_base)) + 
+    geom_point(size = .7) +
+    theme_void() +
+    theme(legend.position = "none") +
+    xlab("") + ylab("") +
+    scale_colour_manual(values = palette) +
+    scale_x_continuous(expand = expansion(0,1)) +
+    # scale_y_continuous(expand = expansion(0,1)) +
+    ggtitle(paste0(meth, " SE=", round(all_mses[meth], 3))) +
+    coord_fixed() +
+    scale_y_reverse(expand = expansion(0,1)) +
+    theme(plot.margin = unit(c(0, 0, 0, 0), "cm"),
+          plot.title = element_text(size = 6))
+  count <- count+1
+  plots[[count]] <- aa
+  
+  
+}
+
+ggsave("suppfig-12methods-7clusters.pdf",
+       plot_grid(plotlist = plots, nrow=4), height = 8, width = 5)
 
 ```
 
@@ -683,6 +729,7 @@ tsvs <- lapply(fs, function(u) {
 pdf("SuppFig-DPLFC-ARI-heatmaps-all-slices.pdf", height = 10, width = 10)
 
 for(i in 1:length(tsvs)) {
+# for(i in 1:2) {
   real_n <- apply(tsvs[[i]], 2, 
                   function(u) length(unique(u)))
   aris_this <- calc_aris(tsvs[[i]][real_n %in% c(5,7,9)])
