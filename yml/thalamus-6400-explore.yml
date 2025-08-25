@@ -17,3 +17,4 @@ ground_truth:
 nns: 6
 nsmoothest: 30
 obs_filter: parcellation_division=="TH" | parcellation_structure=="ZI"
+spot_agreement: TRUE
