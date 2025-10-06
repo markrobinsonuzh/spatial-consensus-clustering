@@ -64,7 +64,7 @@ suppressPackageStartupMessages({
   library(randomcoloR)
   library(STexampleData)
   library(reshape2)
-  library(ClusteringMetrics)
+  library(poem)
   library(gridExtra)
 })
 source("utils.R")
@@ -290,9 +290,34 @@ ann_colors = list(
     n_clust = c("5" = "#1B9E77", "7" = "orange", "9" = "firebrick")
 )
 
+
+
 ph_all <- pheatmap(aris_all, fontsize = 5, 
                    annotation_row = anno_row,
                    annotation_colors = ann_colors)
+
+anno_row1 <- anno_row
+anno_row1$panelA <- NULL
+ss <- strsplit(rownames(anno_row1), "_")
+method <- sapply(ss, .subset, 1)
+methods <- method  %>% unique %>% setdiff("annotation")
+
+mat <- matrix(0, nrow = nrow(anno_row1), 
+       ncol = length(methods), 
+       dimnames = list(rownames(anno_row1), methods))
+
+anno_row1 <- cbind(anno_row1, mat)
+
+for(meth in methods) {
+  ann_colors[[meth]] <- c("0" = "lightgrey", "1" = "black")
+  anno_row1[method==meth,meth] <- 1
+}
+
+
+ph_all <- pheatmap(aris_all, fontsize = 5, 
+                   annotation_row = anno_row1,
+                   annotation_colors = ann_colors)
+
 
 clust <- cutree(ph_all$tree_row, k=2)
 calc_summary(ph_all$tree_row, aris_all, 2, "annotation")
