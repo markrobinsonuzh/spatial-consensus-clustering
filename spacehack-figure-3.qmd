@@ -309,8 +309,41 @@ mat <- matrix(0, nrow = nrow(anno_row1),
 anno_row1 <- cbind(anno_row1, mat)
 
 for(meth in methods) {
-  ann_colors[[meth]] <- c("0" = "lightgrey", "1" = "black")
+  ann_colors[[meth]] <- c("0" = "grey95", "1" = "black")
   anno_row1[method==meth,meth] <- 1
+}
+
+cats_list <- list()
+cats_list$`Embedding-Clustering` <- c("BANKSY","stardust","spatialGE",
+                                      "meringue","SCANIT")
+cats_list$DL <- c("spaGCN","SEDR","SpaceFlow","SOTIP",
+                  "GraphST","STAGATE")
+cats_list$`Bayesian-HMRF` <- c("BayesSpace","precast","scMEB",
+                               "DRSC","SpiceMix","CellCharter",
+                               "maple","bass","Giotto")
+cats_list$`non-spatial` <- c("scanpy", "seurat")
+
+# scMEB
+# Giotto
+
+# > setdiff(unname(unlist(cats_list)), colnames(anno_row1))
+# [1] "scMEB"  "Giotto"
+# 
+# > colnames(anno_row1)
+#  [1] "entropy"     "n_clust"     "scanpy"      "SOTIP"       "DRSC"       
+#  [6] "seurat"      "CellCharter" "BayesSpace"  "STAGATE"     "stardust"   
+# [11] "SpiceMix"    "BANKSY"      "spatialGE"   "maple"       "spaGCN"     
+# [16] "SEDR"        "meringue"    "precast"     "SC"          "bass"       
+# [21] "SpaceFlow"   "SCANIT"      "GraphST"   
+
+cats <- matrix(0, nrow = nrow(anno_row1),
+               ncol = length(cats_list),
+               dimnames = list(rownames(anno_row1), names(cats_list)))
+anno_row1 <- cbind(anno_row1, cats)
+
+for(cat in 1:length(cats_list)) {
+  ann_colors[[names(cats_list)[cat]]] <- c("0" = "grey85", "1" = "darkorange")
+  anno_row1[method %in% cats_list[[cat]],names(cats_list)[cat]] <- 1
 }
 
 
