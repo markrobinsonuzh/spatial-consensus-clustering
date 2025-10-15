@@ -84,6 +84,7 @@ base_clusterings <- read_csv(file.path(datadir,
 #                                        "combined_methods.tsv"),
 #                              show_col_types = FALSE)
 colnames(base_clusterings)[1] <- "barcode_id"
+coords <- base_clusterings[,c("x","y")]
 base_clusterings[,c("label","label_confidence","x","y","z")] <- NULL
 
 
@@ -116,6 +117,13 @@ base_clusterings <- base_clusterings[,real_n>1]
 real_n <- apply(base_clusterings, 2,
                 function(u) length(unique(u)))
 table(real_n)
+
+mse <- apply(base_clusterings, 2,
+             function(u) spot_entropy(coords[,c("x","y")],u, k=10))
+
+se <- colMeans(mse)
+
+
 # 
 # 
 # # focus on clusterings at single number of clusters, loop through
@@ -206,7 +214,7 @@ table(real_n)
 
 # subsample to make faster
 set.seed(14102025)
-s <- sample(ncol(base_clusterings),120,replace = FALSE)
+s <- sample(ncol(base_clusterings),150,replace = FALSE)
 aris_all <- calc_aris(base_clusterings[,s])
 
 
@@ -221,6 +229,8 @@ rownames(anno_row) <- names(real_n[s])
 
 # spot check
 all(names(real_n[s])==rownames(aris_all))
+
+anno_row$se <- se[names(real_n[s])]
 
 # anno_row$panelA <- "not-shown"
 # anno_row$panelA[rownames(anno_row)=="annotation"] <- "annotation"
@@ -289,6 +299,9 @@ ph_all <- pheatmap(aris_all, fontsize = 5,
                    annotation_row = anno_row1,
                    annotation_colors = ann_colors,
                    annotation_legend = FALSE)
+
+save_pheatmap_pdf(ph_all, "rebuttal-thalamus-methodclass.pdf", width=13, height=9)
+
 
 ```
 

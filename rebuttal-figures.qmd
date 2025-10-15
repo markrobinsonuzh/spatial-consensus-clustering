@@ -192,17 +192,6 @@ base_clusterings <- base_clusterings[,real_n %in% nclust_range]
 real_n <- apply(base_clusterings, 2,
                 function(u) length(unique(u)))
 table(real_n)
-
-
-coords <- colData(spe) %>% as.data.frame %>%
-  dplyr::select(barcode_id, row, col)
-all( rownames(coords)==rownames(base_clusterings) )
-
-mse <- apply(base_clusterings, 2,
-             function(u) spot_entropy(coords[,c("row","col")],u, k=6))
-
-se <- colMeans(mse)
-
 # 
 # 
 # # focus on clusterings at single number of clusters, loop through
@@ -301,8 +290,6 @@ rownames(anno_row) <- names(real_n)
 # spot check
 all(names(real_n)==rownames(aris_all))
 
-anno_row$se <- se[names(real_n)]
-
 # anno_row$panelA <- "not-shown"
 # anno_row$panelA[rownames(anno_row)=="annotation"] <- "annotation"
 
@@ -369,9 +356,7 @@ anno_row1$n_clust <- NULL
 ph_all <- pheatmap(aris_all, fontsize = 5, 
                    annotation_row = anno_row1,
                    annotation_colors = ann_colors,
-                   annotation_legend = TRUE)
-
-save_pheatmap_pdf(ph_all, "rebuttal-libd-methodclass.pdf", width=13, height=9)
+                   annotation_legend = FALSE)
 
 ```
 
