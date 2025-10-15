@@ -1,0 +1,301 @@
+---
+title: "Code for Rebuttal Figures"
+format: 
+    html:
+      toc: true
+      self-contained: true
+      highlight-style: github
+      code-line-numbers: true
+      code-fold: true
+editor: source
+editor_options: 
+  chunk_output_type: console
+#params:
+#  datadir: 'test'
+#  nmethod_range:
+#  ground_truth:
+#  nns: 6
+#  name: "noname"
+#  nclust_range:
+#  nsmoothest: 30
+#  obs_filter: NULL
+---
+
+## Retrieve parameters
+
+```{r display-params}
+datadir <- "data/abc_atlas_wmb_thalamus"
+# name <- "fig3"
+# nclust_range <- c(5,7,9)
+# nmethod_range <- 5:12
+
+
+# gt <- c("parcellation_structure","parcellation_substructure")
+# k <- 6
+# nclust_range <- c(16,20,24)
+# nmethod_range <- c(3,4,5,6,7,8,9)
+# nsmoothest <- c(30)
+# obs_filter <- 'parcellation_division=="TH" | parcellation_structure=="ZI"'
+
+# if datadir ends in `/`, it screws up the parsing of method names,
+# so add a check for it
+stopifnot(tail(strsplit(datadir,"")[[1]],1)!="/")
+
+```
+
+## Packages / functions
+
+```{r load-packages}
+suppressPackageStartupMessages({
+  library(SpatialExperiment)
+  library(dplyr)
+  library(ggplot2)
+  library(cowplot)
+  library(clue)
+  library(khroma)
+  library(scran)
+  library(limma)
+  library(tibble)
+  library(readr)
+  library(ggrepel)
+  library(mclust)
+  library(pheatmap)
+  library(fastDummies)
+  library(randomcoloR)
+  library(STexampleData)
+  library(reshape2)
+  library(poem)
+  library(gridExtra)
+})
+source("utils.R")
+```
+
+
+## Load data 
+
+```{r load-data}
+
+
+base_clusterings <- read_csv(file.path(datadir, 
+                                       "combined_clusters_6800.csv"),
+                             show_col_types = FALSE,
+                             n_max = 12120)
+# base_clusterings <- read_tsv(file.path(datadir, 
+#                                        "combined_methods.tsv"),
+#                              show_col_types = FALSE)
+colnames(base_clusterings)[1] <- "barcode_id"
+base_clusterings[,c("label","label_confidence","x","y","z")] <- NULL
+
+
+# "-" this causes problems later (with LCA)
+colnames(base_clusterings) <- gsub("SCAN-IT", "SCANIT", 
+                                   colnames(base_clusterings))
+
+rownames(base_clusterings) <- NULL
+base_clusterings <- base_clusterings %>%
+  as.data.frame %>%
+  column_to_rownames("barcode_id")
+
+
+```
+
+
+## Smoothness-entropy of base clusterings (not used)
+
+```{r smoothness-entropy, fig.width=8, fig.height=6, eval=TRUE}
+
+
+# # find number of actual clusters per column
+real_n <- apply(base_clusterings, 2,
+                function(u) length(unique(u)))
+table(real_n)
+
+base_clusterings <- base_clusterings[,real_n>1]
+
+
+real_n <- apply(base_clusterings, 2,
+                function(u) length(unique(u)))
+table(real_n)
+# 
+# 
+# # focus on clusterings at single number of clusters, loop through
+# p <- vector("list", length = length(nclust_range))
+# count <- 1
+# 
+# all_mses <- NULL
+# k <- 6
+# 
+# for(nclust in nclust_range) {
+# 
+#   these_clusterings <- base_clusterings %>%
+#     dplyr::select(names(which(real_n==nclust)))
+# 
+#   coords <- colData(spe) %>% as.data.frame %>%
+#     dplyr::select(barcode_id, row, col)
+# 
+#   df <- these_clusterings %>%
+#     rownames_to_column("barcode_id") %>%
+#     left_join(coords, by = "barcode_id")
+# 
+#   palette <- distinctColorPalette(nclust)
+#   names(palette) <- 1:nclust
+# 
+#   mse <- apply(these_clusterings, 2,
+#                function(u) spot_entropy(coords[,c("row","col")],
+#                                         u, k=k))
+#   cm <- mse %>% colMeans
+#   lv <- cm %>% sort %>% names
+#   print(cm)
+# 
+#   all_mses <- append(all_mses, cm)
+# 
+#   mse_m <- melt(mse, value.name = "entropy")
+#   mse_m$Var2 <- factor(mse_m$Var2, levels=lv)
+# 
+#   mse_p <- ggplot(mse_m, aes(Var2, entropy)) +
+#     geom_violin() +
+#     ylab(paste0("pointwise entropy (k=", k, ")")) +
+#     xlab("base clustering") +
+#     theme_classic() +
+#     theme(axis.text.x = element_text(angle = 45,
+#                                      vjust = 1, hjust=1)) +
+#     geom_label(data = data.frame(Var2=names(cm),
+#                                  entropy = cm, label=round(cm,4)),
+#                mapping = aes(x=Var2,y=entropy,label=label), size = 2) +
+#     scale_y_sqrt() +
+#     ggtitle(paste0("Smoothness-entropy (", nclust, " clusters)"))
+# 
+#   # show(mse_p)
+#   p[[count]] <- mse_p
+#   count <- count+1
+# 
+# }
+# 
+# 
+# mse_anno <- spot_entropy(coords[,c("row","col")], spe$ground_truth, k=k) %>% 
+#   mean %>% setNames("annotation")
+# all_mses <- append(all_mses, mse_anno)
+# 
+# real_n <- c(real_n, length(unique(cd$ground_truth)))
+# names(real_n)[length(real_n)] <- "annotation"
+# 
+# m <- match(names(real_n), names(all_mses))
+# all_mses <- all_mses[m]
+# 
+# all(names(all_mses)==names(real_n))
+# 
+# 
+# ggsave(filename = paste0("figure-3-smoothness-entropy.pdf"),
+#        plot = marrangeGrob(p, nrow=3, ncol=1),
+#        width = 10, height = 15)
+# 
+# # all_mses
+
+```
+
+
+## Similarity of all clusterings: 
+
+```{r clustering-similarities, fig.height=9, fig.width=10}
+# keepers <- names(bases)
+# aris_all <- calc_aris(cbind(base_clusterings,
+#                             annotation=cd[,"ground_truth"]))
+# all(colnames(aris_all) %in% names(all_mses))
+
+# aris_all <- calc_aris(base_clusterings)
+
+# subsample to make faster
+set.seed(14102025)
+s <- sample(ncol(base_clusterings),120,replace = FALSE)
+aris_all <- calc_aris(base_clusterings[,s])
+
+
+# anno_row <- data.frame(entropy = all_mses)
+# rownames(anno_row) <- names(all_mses)
+
+# anno_row <- data.frame(n_clust = real_n)
+# rownames(anno_row) <- names(real_n)
+
+anno_row <- data.frame(n_clust = real_n[s])
+rownames(anno_row) <- names(real_n[s])
+
+# spot check
+all(names(real_n[s])==rownames(aris_all))
+
+# anno_row$panelA <- "not-shown"
+# anno_row$panelA[rownames(anno_row)=="annotation"] <- "annotation"
+
+ann_colors = list(
+    n_clust = c("5" = "#1B9E77", "7" = "orange", "9" = "firebrick")
+)
+
+
+# ph_all <- pheatmap(aris_all, fontsize = 5, 
+#                    annotation_row = anno_row,
+#                    annotation_colors = ann_colors)
+
+anno_row1 <- anno_row
+ss <- strsplit(rownames(anno_row1), "_")
+method <- sapply(ss, .subset, 1)
+methods <- method  %>% unique #%>% setdiff("annotation")
+
+mat <- matrix(0, nrow = nrow(anno_row1), 
+       ncol = length(methods), 
+       dimnames = list(rownames(anno_row1), methods))
+
+anno_row1 <- cbind(anno_row1, mat)
+
+for(meth in methods) {
+  ann_colors[[meth]] <- c("0" = "grey95", "1" = "black")
+  anno_row1[method==meth,meth] <- 1
+}
+
+cats_list <- list()
+cats_list$`Embedding-Clustering` <- c("BANKSY","stardust","spatialGE",
+                                      "meringue","SCANIT")
+cats_list$DL <- c("spaGCN","SEDR","SpaceFlow","SOTIP",
+                  "GraphST","STAGATE")
+cats_list$`Bayesian-HMRF` <- c("BayesSpace","precast","scMEB",
+                               "DRSC","SpiceMix","CellCharter",
+                               "maple","bass","Giotto")
+cats_list$`non-spatial` <- c("scanpy", "seurat")
+
+# scMEB
+# Giotto
+
+# > setdiff(unname(unlist(cats_list)), colnames(anno_row1))
+# [1] "scMEB"  "Giotto"
+# 
+# > colnames(anno_row1)
+#  [1] "entropy"     "n_clust"     "scanpy"      "SOTIP"       "DRSC"       
+#  [6] "seurat"      "CellCharter" "BayesSpace"  "STAGATE"     "stardust"   
+# [11] "SpiceMix"    "BANKSY"      "spatialGE"   "maple"       "spaGCN"     
+# [16] "SEDR"        "meringue"    "precast"     "SC"          "bass"       
+# [21] "SpaceFlow"   "SCANIT"      "GraphST"   
+
+cats <- matrix(0, nrow = nrow(anno_row1),
+               ncol = length(cats_list),
+               dimnames = list(rownames(anno_row1), names(cats_list)))
+anno_row1 <- cbind(anno_row1, cats)
+
+for(cat in 1:length(cats_list)) {
+  ann_colors[[names(cats_list)[cat]]] <- c("0" = "grey85", "1" = "darkorange")
+  anno_row1[method %in% cats_list[[cat]],names(cats_list)[cat]] <- 1
+}
+
+anno_row1$n_clust <- NULL
+
+ph_all <- pheatmap(aris_all, fontsize = 5, 
+                   annotation_row = anno_row1,
+                   annotation_colors = ann_colors,
+                   annotation_legend = FALSE)
+
+```
+
+
+## sessionInfo()
+
+```{r sessioninfo}
+sessionInfo()
+```
+
