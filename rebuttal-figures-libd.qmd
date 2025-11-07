@@ -333,13 +333,15 @@ for(meth in methods) {
 
 cats_list <- list()
 cats_list$`Embedding-Clustering` <- c("BANKSY","stardust","spatialGE",
+                                      "CellCharter",
                                       "meringue","SCANIT")
 cats_list$DL <- c("spaGCN","SEDR","SpaceFlow","SOTIP",
                   "GraphST","STAGATE")
 cats_list$`Bayesian-HMRF` <- c("BayesSpace","precast","scMEB",
-                               "DRSC","SpiceMix","CellCharter",
+                               "DRSC","SpiceMix",
                                "maple","bass","Giotto")
 cats_list$`non-spatial` <- c("scanpy", "seurat")
+
 
 # scMEB
 # Giotto
@@ -366,9 +368,14 @@ for(cat in 1:length(cats_list)) {
 
 anno_row1$n_clust <- NULL
 
+greens <- colorRampPalette(RColorBrewer::brewer.pal(n = 7,
+                                name = "Greens"))(100)
+
+
 ph_all <- pheatmap(aris_all, fontsize = 5, 
                    annotation_row = anno_row1,
                    annotation_colors = ann_colors,
+                   color = greens,
                    annotation_legend = TRUE)
 
 save_pheatmap_pdf(ph_all, "rebuttal-libd-methodclass.pdf", width=13, height=9)

@@ -24,7 +24,8 @@ editor_options:
 ## Retrieve parameters
 
 ```{r display-params}
-datadir <- "data/abc_atlas_wmb_thalamus"
+datadir <- "data/other-datasets"
+stub <- "cosmc_lung_Lung9_Rep2"
 # name <- "fig3"
 # nclust_range <- c(5,7,9)
 # nmethod_range <- 5:12
@@ -76,26 +77,44 @@ source("utils.R")
 ```{r load-data}
 
 
-base_clusterings <- read_csv(file.path(datadir, 
-                                       "combined_clusters_6800.csv"),
-                             show_col_types = FALSE,
-                             n_max = 12120)
+base_clusterings <- read_tsv(file.path(datadir, 
+                                       paste0("combined_domains_", stub, ".tsv")),
+                             show_col_types = FALSE)
 # base_clusterings <- read_tsv(file.path(datadir, 
 #                                        "combined_methods.tsv"),
 #                              show_col_types = FALSE)
 colnames(base_clusterings)[1] <- "barcode_id"
-coords <- base_clusterings[,c("x","y")]
-base_clusterings[,c("label","label_confidence","x","y","z")] <- NULL
+# coords <- base_clusterings[,c("x","y")]
+# base_clusterings[,c("label","label_confidence","x","y","z")] <- NULL
 
 
 # "-" this causes problems later (with LCA)
 colnames(base_clusterings) <- gsub("SCAN-IT", "SCANIT", 
                                    colnames(base_clusterings))
 
+# coords <- read_tsv(file.path(datadir,
+#                              "coordinates_visium_hd.tsv"),
+#                              show_col_types = FALSE)
+# colnames(coords)[1] <- "barcode_id"
+# 
+# head(coords)
+# head(base_clusterings[,1:5])
+# 
+# m <- match(base_clusterings$barcode_id, coords$barcode_id)
+# sum(is.na(m))
+# 
+# coords <- coords[m,]
+
+
+
 rownames(base_clusterings) <- NULL
 base_clusterings <- base_clusterings %>%
   as.data.frame %>%
   column_to_rownames("barcode_id")
+
+
+
+# all(rownames(base_clusterings)==coords$barcode_id)
 
 
 ```
@@ -111,93 +130,37 @@ real_n <- apply(base_clusterings, 2,
                 function(u) length(unique(u)))
 table(real_n)
 
-base_clusterings <- base_clusterings[,real_n==20]
+base_clusterings <- base_clusterings[,real_n>1]
 
 
 real_n <- apply(base_clusterings, 2,
                 function(u) length(unique(u)))
 table(real_n)
 
-mse <- apply(base_clusterings, 2,
-             function(u) spot_entropy(coords[,c("x","y")],u, k=10))
 
-se <- colMeans(mse)
+# > library(parallel)
+# > detectCores()
+# [1] 8
 
 
-# 
-# 
-# # focus on clusterings at single number of clusters, loop through
-# p <- vector("list", length = length(nclust_range))
-# count <- 1
-# 
-# all_mses <- NULL
-# k <- 6
-# 
-# for(nclust in nclust_range) {
-# 
-#   these_clusterings <- base_clusterings %>%
-#     dplyr::select(names(which(real_n==nclust)))
-# 
-#   coords <- colData(spe) %>% as.data.frame %>%
-#     dplyr::select(barcode_id, row, col)
-# 
-#   df <- these_clusterings %>%
-#     rownames_to_column("barcode_id") %>%
-#     left_join(coords, by = "barcode_id")
-# 
-#   palette <- distinctColorPalette(nclust)
-#   names(palette) <- 1:nclust
-# 
-#   mse <- apply(these_clusterings, 2,
-#                function(u) spot_entropy(coords[,c("row","col")],
-#                                         u, k=k))
-#   cm <- mse %>% colMeans
-#   lv <- cm %>% sort %>% names
-#   print(cm)
-# 
-#   all_mses <- append(all_mses, cm)
-# 
-#   mse_m <- melt(mse, value.name = "entropy")
-#   mse_m$Var2 <- factor(mse_m$Var2, levels=lv)
-# 
-#   mse_p <- ggplot(mse_m, aes(Var2, entropy)) +
-#     geom_violin() +
-#     ylab(paste0("pointwise entropy (k=", k, ")")) +
-#     xlab("base clustering") +
-#     theme_classic() +
-#     theme(axis.text.x = element_text(angle = 45,
-#                                      vjust = 1, hjust=1)) +
-#     geom_label(data = data.frame(Var2=names(cm),
-#                                  entropy = cm, label=round(cm,4)),
-#                mapping = aes(x=Var2,y=entropy,label=label), size = 2) +
-#     scale_y_sqrt() +
-#     ggtitle(paste0("Smoothness-entropy (", nclust, " clusters)"))
-# 
-#   # show(mse_p)
-#   p[[count]] <- mse_p
-#   count <- count+1
-# 
+# # large compute time.
+# mse <- apply(base_clusterings, 2,
+#              function(u) spot_entropy(coords[,c("x","y")],u, k=10))
+# se <- colMeans(mse)
+
+
+# library(parallel)
+# library(doParallel)
+# cl <- makeCluster(detectCores()-2)
+# registerDoParallel(cl)
+# mse <- foreach(i =  1:NCOL(base_clusterings)) %dopar% {
+#   spot_entropy(coords[,c("x","y")],base_clusterings[,i], k=10)
 # }
+# stopCluster(cl)
 # 
 # 
-# mse_anno <- spot_entropy(coords[,c("row","col")], spe$ground_truth, k=k) %>% 
-#   mean %>% setNames("annotation")
-# all_mses <- append(all_mses, mse_anno)
-# 
-# real_n <- c(real_n, length(unique(cd$ground_truth)))
-# names(real_n)[length(real_n)] <- "annotation"
-# 
-# m <- match(names(real_n), names(all_mses))
-# all_mses <- all_mses[m]
-# 
-# all(names(all_mses)==names(real_n))
-# 
-# 
-# ggsave(filename = paste0("figure-3-smoothness-entropy.pdf"),
-#        plot = marrangeGrob(p, nrow=3, ncol=1),
-#        width = 10, height = 15)
-# 
-# # all_mses
+# se <- sapply(mse, mean)
+# names(se) <- colnames(base_clusterings)
 
 ```
 
@@ -212,29 +175,30 @@ se <- colMeans(mse)
 
 # aris_all <- calc_aris(base_clusterings)
 
-# # subsample to make faster
-# set.seed(14102025)
-# s <- sample(ncol(base_clusterings),150,replace = FALSE)
-# aris_all <- calc_aris(base_clusterings[,s])
+# subsample to make faster
+set.seed(14102025)
+if(ncol(base_clusterings) < 20) {
+  s <- seq_len(ncol(base_clusterings))
+} else {
+  s <- sample(ncol(base_clusterings),50,replace = FALSE)
+}
+system.time( aris_all <- calc_aris(base_clusterings[,s]) )
 
-aris_all <- calc_aris(base_clusterings)
 
 # anno_row <- data.frame(entropy = all_mses)
 # rownames(anno_row) <- names(all_mses)
 
-anno_row <- data.frame(n_clust = real_n)
-rownames(anno_row) <- names(real_n)
+# anno_row <- data.frame(n_clust = real_n)
+# rownames(anno_row) <- names(real_n)
 
-# anno_row <- data.frame(n_clust = real_n[s])
-# rownames(anno_row) <- names(real_n[s])
+anno_row <- data.frame(n_clust = real_n[s])
+rownames(anno_row) <- names(real_n[s])
 
 # spot check
-# all(names(real_n[s])==rownames(aris_all))
+all(names(real_n[s])==rownames(aris_all))
 
-all(names(real_n)==rownames(aris_all))
-
-# anno_row$se <- se[names(real_n[s])]
-anno_row$se <- se[names(real_n)]
+if(exists("se"))
+  anno_row$se <- se[names(real_n[s])]
 
 # anno_row$panelA <- "not-shown"
 # anno_row$panelA[rownames(anno_row)=="annotation"] <- "annotation"
@@ -266,15 +230,13 @@ for(meth in methods) {
 
 cats_list <- list()
 cats_list$`Embedding-Clustering` <- c("BANKSY","stardust","spatialGE",
-                                      "CellCharter",
                                       "meringue","SCANIT")
 cats_list$DL <- c("spaGCN","SEDR","SpaceFlow","SOTIP",
                   "GraphST","STAGATE")
 cats_list$`Bayesian-HMRF` <- c("BayesSpace","precast","scMEB",
-                               "DRSC","SpiceMix",
+                               "DRSC","SpiceMix","CellCharter",
                                "maple","bass","Giotto")
 cats_list$`non-spatial` <- c("scanpy", "seurat")
-
 
 # scMEB
 # Giotto
@@ -311,7 +273,7 @@ ph_all <- pheatmap(aris_all, fontsize = 5,
                    color = greens,
                    annotation_legend = FALSE)
 
-save_pheatmap_pdf(ph_all, "rebuttal-thalamus-methodclass.pdf", width=13, height=9)
+save_pheatmap_pdf(ph_all, paste0("rebuttal-", stub, ".pdf"), width=13, height=9)
 
 
 ```

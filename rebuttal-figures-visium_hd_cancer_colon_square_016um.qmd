@@ -24,7 +24,7 @@ editor_options:
 ## Retrieve parameters
 
 ```{r display-params}
-datadir <- "data/abc_atlas_wmb_thalamus"
+datadir <- "data/other-datasets"
 # name <- "fig3"
 # nclust_range <- c(5,7,9)
 # nmethod_range <- 5:12
@@ -76,26 +76,44 @@ source("utils.R")
 ```{r load-data}
 
 
-base_clusterings <- read_csv(file.path(datadir, 
-                                       "combined_clusters_6800.csv"),
-                             show_col_types = FALSE,
-                             n_max = 12120)
+base_clusterings <- read_tsv(file.path(datadir, 
+                                       "combined_domains_visium_hd_cancer_colon_square_016um.tsv"),
+                             show_col_types = FALSE)
 # base_clusterings <- read_tsv(file.path(datadir, 
 #                                        "combined_methods.tsv"),
 #                              show_col_types = FALSE)
 colnames(base_clusterings)[1] <- "barcode_id"
-coords <- base_clusterings[,c("x","y")]
-base_clusterings[,c("label","label_confidence","x","y","z")] <- NULL
+# coords <- base_clusterings[,c("x","y")]
+# base_clusterings[,c("label","label_confidence","x","y","z")] <- NULL
 
 
 # "-" this causes problems later (with LCA)
 colnames(base_clusterings) <- gsub("SCAN-IT", "SCANIT", 
                                    colnames(base_clusterings))
 
+coords <- read_tsv(file.path(datadir,
+                             "coordinates_visium_hd.tsv"),
+                             show_col_types = FALSE)
+colnames(coords)[1] <- "barcode_id"
+
+head(coords)
+head(base_clusterings[,1:5])
+
+m <- match(base_clusterings$barcode_id, coords$barcode_id)
+sum(is.na(m))
+
+coords <- coords[m,]
+
+
+
 rownames(base_clusterings) <- NULL
 base_clusterings <- base_clusterings %>%
   as.data.frame %>%
   column_to_rownames("barcode_id")
+
+
+
+all(rownames(base_clusterings)==coords$barcode_id)
 
 
 ```
@@ -111,18 +129,46 @@ real_n <- apply(base_clusterings, 2,
                 function(u) length(unique(u)))
 table(real_n)
 
-base_clusterings <- base_clusterings[,real_n==20]
+base_clusterings <- base_clusterings[,real_n>1]
 
 
 real_n <- apply(base_clusterings, 2,
                 function(u) length(unique(u)))
 table(real_n)
 
-mse <- apply(base_clusterings, 2,
-             function(u) spot_entropy(coords[,c("x","y")],u, k=10))
 
-se <- colMeans(mse)
+# > library(parallel)
+# > detectCores()
+# [1] 8
 
+
+# # large compute time.
+# mse <- apply(base_clusterings, 2,
+#              function(u) spot_entropy(coords[,c("x","y")],u, k=10))
+# se <- colMeans(mse)
+
+
+# spot_entropy
+
+# library(parallel)
+# cl <- makeCluster(detectCores()-2)
+# mse <- parApply(cl, base_clusterings, 2,
+#              function(u) spot_entropy(coords[,c("x","y")],u, k=10))
+# stopCluster(cl)
+
+
+library(parallel)
+library(doParallel)
+cl <- makeCluster(detectCores()-2)
+registerDoParallel(cl)
+mse <- foreach(i =  1:NCOL(base_clusterings)) %dopar% {
+  spot_entropy(coords[,c("x","y")],base_clusterings[,i], k=10)
+}
+stopCluster(cl)
+
+
+se <- sapply(mse, mean)
+names(se) <- colnames(base_clusterings)
 
 # 
 # 
@@ -212,29 +258,25 @@ se <- colMeans(mse)
 
 # aris_all <- calc_aris(base_clusterings)
 
-# # subsample to make faster
-# set.seed(14102025)
-# s <- sample(ncol(base_clusterings),150,replace = FALSE)
-# aris_all <- calc_aris(base_clusterings[,s])
+# subsample to make faster
+set.seed(14102025)
+s <- sample(ncol(base_clusterings),100,replace = FALSE)
+system.time( aris_all <- calc_aris(base_clusterings[,s]) )
 
-aris_all <- calc_aris(base_clusterings)
 
 # anno_row <- data.frame(entropy = all_mses)
 # rownames(anno_row) <- names(all_mses)
 
-anno_row <- data.frame(n_clust = real_n)
-rownames(anno_row) <- names(real_n)
+# anno_row <- data.frame(n_clust = real_n)
+# rownames(anno_row) <- names(real_n)
 
-# anno_row <- data.frame(n_clust = real_n[s])
-# rownames(anno_row) <- names(real_n[s])
+anno_row <- data.frame(n_clust = real_n[s])
+rownames(anno_row) <- names(real_n[s])
 
 # spot check
-# all(names(real_n[s])==rownames(aris_all))
+all(names(real_n[s])==rownames(aris_all))
 
-all(names(real_n)==rownames(aris_all))
-
-# anno_row$se <- se[names(real_n[s])]
-anno_row$se <- se[names(real_n)]
+anno_row$se <- se[names(real_n[s])]
 
 # anno_row$panelA <- "not-shown"
 # anno_row$panelA[rownames(anno_row)=="annotation"] <- "annotation"
@@ -275,7 +317,6 @@ cats_list$`Bayesian-HMRF` <- c("BayesSpace","precast","scMEB",
                                "maple","bass","Giotto")
 cats_list$`non-spatial` <- c("scanpy", "seurat")
 
-
 # scMEB
 # Giotto
 
@@ -311,7 +352,7 @@ ph_all <- pheatmap(aris_all, fontsize = 5,
                    color = greens,
                    annotation_legend = FALSE)
 
-save_pheatmap_pdf(ph_all, "rebuttal-thalamus-methodclass.pdf", width=13, height=9)
+save_pheatmap_pdf(ph_all, "rebuttal-visium_hd_cancer_colon_square_016um.pdf", width=13, height=9)
 
 
 ```
